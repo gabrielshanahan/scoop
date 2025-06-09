@@ -1,0 +1,94 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ForbiddenComment:EventLoop.kt$EventLoop$// TODO: Remove recursionCount</ID>
+    <ID>ForbiddenComment:EventLoop.kt$EventLoop$// TODO: Remove these when finished</ID>
+    <ID>ForbiddenComment:EventLoop.kt$EventLoop$// TODO: move this to coroutine as a parameter! Ideally should be part</ID>
+    <ID>ForbiddenComment:PostgresMessageQueue.kt$PostgresMessageQueue$// TODO: config</ID>
+    <ID>ForbiddenComment:RollbackPathContinuation.kt$// TODO: Config</ID>
+    <ID>LargeClass:RollbackPathTest.kt$RollbackPathTest : StructuredCooperationTest</ID>
+    <ID>LongMethod:CancellationTest.kt$CancellationTest$@Test fun `cancellation after everything has finished running has no effect`()</ID>
+    <ID>LongMethod:CancellationTest.kt$CancellationTest$@Test fun `cancellation works`()</ID>
+    <ID>LongMethod:ContextPropagationTest.kt$ContextPropagationTest$@Test fun `context is propagated correctly`()</ID>
+    <ID>LongMethod:DeadlineTest.kt$DeadlineTest$@Test fun `happy path deadlines work`()</ID>
+    <ID>LongMethod:EventLoop.kt$EventLoop$fun tick( topic: String, distributedCoroutine: DistributedCoroutine, recursionCount: Int = 0, ): Uni&lt;Unit&gt;</ID>
+    <ID>LongMethod:EventLoop.kt$EventLoop$private fun fetchSomePendingCoroutineState( connection: Connection, distributedCoroutine: DistributedCoroutine, ): CoroutineState?</ID>
+    <ID>LongMethod:EventLoop.kt$EventLoop$private fun fetchSomePendingCoroutineState( connection: SqlConnection, distributedCoroutine: DistributedCoroutine, ): Uni&lt;CoroutineState&gt;</ID>
+    <ID>LongMethod:EventLoop.kt$EventLoop$private fun resumeCoroutine( connection: Connection, distributedCoroutine: DistributedCoroutine, coroutineState: CoroutineState, ): Continuation.ContinuationResult</ID>
+    <ID>LongMethod:EventLoop.kt$EventLoop$private fun resumeCoroutine( connection: SqlConnection, distributedCoroutine: DistributedCoroutine, coroutineState: CoroutineState, ): Uni&lt;Continuation.ContinuationResult&gt;</ID>
+    <ID>LongMethod:HappyPathTest.kt$HappyPathTest$@Test fun `handler should not complete until handlers listening to emitted messages complete - depth 1`()</ID>
+    <ID>LongMethod:HappyPathTest.kt$HappyPathTest$@Test fun `handler should not complete until handlers listening to emitted messages complete - depth 2`()</ID>
+    <ID>LongMethod:HappyPathTest.kt$HappyPathTest$@Test fun `multiple handlers at same level should all complete before parent handler completes`()</ID>
+    <ID>LongMethod:HappyPathTest.kt$HappyPathTest$@Test fun `parent should wait for multiple handlers listening to the same topic`()</ID>
+    <ID>LongMethod:MessageEventRepository.kt$MessageEventRepository$fun startContinuationsForCoroutine( connection: Connection, coroutineName: String, coroutineIdentifier: String, topic: String, eventLoopStrategy: EventLoopStrategy, )</ID>
+    <ID>LongMethod:MessageEventRepository.kt$MessageEventRepository$fun startContinuationsForCoroutine( connection: SqlConnection, coroutineName: String, coroutineIdentifier: String, topic: String, eventLoopStrategy: EventLoopStrategy, ): Uni&lt;Unit&gt;</ID>
+    <ID>LongMethod:MessageEventsTest.kt$MessageEventsTest$@Test fun `multiple handler instances should coordinate using message events for multiple messages`()</ID>
+    <ID>LongMethod:MessageEventsTest.kt$MessageEventsTest$@Test fun `should follow complete message event writing sequence on failed processing`()</ID>
+    <ID>LongMethod:PendingCoroutineRunSql.kt$fun candidateSeensWaitingToBeProcessed(eventLoopStrategy: EventLoopStrategy)</ID>
+    <ID>LongMethod:PendingCoroutineRunSqlTest.kt$PendingCoroutineRunSqlTest.ChildRollingBacks$@Test fun `picks up child rolling backs and their terminations`()</ID>
+    <ID>LongMethod:RollbackPathContinuation.kt$internal fun DistributedCoroutine.buildRollbackPathContinuation( connection: Connection, coroutineState: CoroutineState, scopeCapabilities: ScopeCapabilities, ): RollbackPathContinuation</ID>
+    <ID>LongMethod:RollbackPathContinuation.kt$internal fun DistributedCoroutine.buildRollbackPathContinuation( connection: SqlConnection, coroutineState: CoroutineState, scopeCapabilities: ScopeCapabilities, ): RollbackPathContinuation</ID>
+    <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest$@Test fun `a handler failing in its second step should emit ROLLBACK_EMITTEDs for messages emitted in the first step, and then roll it back`()</ID>
+    <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest$@Test fun `failed rollbacks are well behaved n-deep`()</ID>
+    <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest$@Test fun `rollbacks are well behaved n-deep`()</ID>
+    <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest$@Test fun `when a child fails, rollbacks happen in reverse order`()</ID>
+    <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest$@Test fun `when a later step fails, previous emissions are rolled back`()</ID>
+    <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest.HandleChildFailures$@Test fun `when stuff is emitted in handleChildFailures and then a rollback happens, all things that haven't already been rolled back are rolled back`()</ID>
+    <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest.RollbackRequests$@Test fun `rolling back sub-hierarchy works (but should be done carefully, as you run the risk of bringing the state of the system into an inconsistent state from a business perspective)`()</ID>
+    <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest.RollbackRequests$@Test fun `rolling back the entire hierarchy works`()</ID>
+    <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest.RollbackRequests$@Test fun `rolling back while things are still running has no effect`()</ID>
+    <ID>LongMethod:TryFinallyTest.kt$TryFinallyTest$@Test fun `finally is executed on child failure`()</ID>
+    <ID>LongMethod:TryFinallyTest.kt$TryFinallyTest$@Test fun `finally is executed on success`()</ID>
+    <ID>LongMethod:TryFinallyTest.kt$TryFinallyTest$@Test fun `finally is executed, once, on subsequent step failure`()</ID>
+    <ID>LongMethod:TryFinallyTest.kt$TryFinallyTest$@Test fun `finally is only executed once when its child causes a rollback`()</ID>
+    <ID>LongParameterList:MessageEventRepository.kt$MessageEventRepository$( client: SqlClient, messageId: UUID, messageEventType: String, coroutineName: String, coroutineIdentifier: String, stepName: String?, cooperationLineage: List&lt;UUID&gt;, exception: CooperationFailure?, context: CooperationContext?, )</ID>
+    <ID>LongParameterList:MessageEventRepository.kt$MessageEventRepository$( connection: Connection, messageId: UUID, coroutineName: String, coroutineIdentifier: String, stepName: String?, cooperationLineage: List&lt;UUID&gt;, context: CooperationContext?, )</ID>
+    <ID>LongParameterList:MessageEventRepository.kt$MessageEventRepository$( connection: Connection, messageId: UUID, messageEventType: String, coroutineName: String, coroutineIdentifier: String, stepName: String?, cooperationLineage: List&lt;UUID&gt;, exception: CooperationFailure?, context: CooperationContext?, )</ID>
+    <ID>LongParameterList:MessageEventRepository.kt$MessageEventRepository$( connection: Connection, stepName: String, cooperationLineage: List&lt;UUID&gt;, coroutineName: String, coroutineIdentifier: String, scopeStepName: String?, exception: CooperationFailure, context: CooperationContext?, )</ID>
+    <ID>LongParameterList:MessageEventRepository.kt$MessageEventRepository$( connection: SqlConnection, messageId: UUID, coroutineName: String, coroutineIdentifier: String, stepName: String?, cooperationLineage: List&lt;UUID&gt;, context: CooperationContext?, )</ID>
+    <ID>LongParameterList:MessageEventRepository.kt$MessageEventRepository$( connection: SqlConnection, stepName: String, cooperationLineage: List&lt;UUID&gt;, coroutineName: String, coroutineIdentifier: String, scopeStepName: String?, exception: CooperationFailure, context: CooperationContext?, )</ID>
+    <ID>MagicNumber:PostgresMessageQueue.kt$PostgresMessageQueue$50</ID>
+    <ID>MagicNumber:util.kt$12</ID>
+    <ID>MagicNumber:util.kt$23</ID>
+    <ID>MagicNumber:util.kt$31</ID>
+    <ID>MagicNumber:util.kt$59</ID>
+    <ID>MagicNumber:util.kt$9999</ID>
+    <ID>MagicNumber:util.kt$999999000</ID>
+    <ID>MagicNumber:utils.kt$0.02</ID>
+    <ID>MatchingDeclarationName:PendingCoroutineRunSql.kt$SQL</ID>
+    <ID>MaxLineLength:DeadlineTest.kt$DeadlineTest$"[${childHandlerCoroutine.identifier.asSource()}] io.github.gabrielshanahan.scoop.shared.coroutine.structuredcooperation.GaveUpException: &lt;no message&gt;"</ID>
+    <ID>MaxLineLength:DeadlineTest.kt$DeadlineTest$"[${rootHandlerCoroutine.identifier.asSource()}] io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.ChildRolledBackException: Child failure occurred while suspended in step [0]"</ID>
+    <ID>MaxLineLength:DeadlineTest.kt$DeadlineTest$"[root handler] MissedHappyPathDeadline: Missed happy path deadline of root handler at ${deadline.get().deadline.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)}. Deadline trace: [{\"HappyPathDeadlineKey\": {\"trace\": [], \"source\": \"root system\", \"deadline\": \"9999-12-31T23:59:59.999999Z\"}}]"</ID>
+    <ID>MaxLineLength:EventLoop.kt$EventLoop$"[${(connection as ConnectionWrapper).unwrap(PgConnection::class.java).backendPID}] Error when starting continuations for coroutine ${distributedCoroutine.identifier}"</ID>
+    <ID>MaxLineLength:EventLoopStrategy.kt$EventLoopStrategy$*</ID>
+    <ID>MaxLineLength:RollbackPathTest.kt$RollbackPathTest$"[${childHandler1Coroutine.identifier.asSource()}] io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.ChildRollbackFailedException: Child rollback failure occurred while suspended in step [Rollback of 1 (rolling back child scopes)]"</ID>
+    <ID>MaxLineLength:RollbackPathTest.kt$RollbackPathTest$"[${childHandler1Coroutine.identifier.asSource()}] io.github.gabrielshanahan.scoop.shared.coroutine.structuredcooperation.ParentSaidSoException: &lt;no message&gt;"</ID>
+    <ID>MaxLineLength:RollbackPathTest.kt$RollbackPathTest$"[${rootHandlerCoroutine.identifier.asSource()}] io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.ChildRollbackFailedException: Child rollback failure occurred while suspended in step [Rollback of 1 (rolling back child scopes)]"</ID>
+    <ID>MaxLineLength:RollbackPathTest.kt$RollbackPathTest$"[${rootHandlerCoroutine.identifier.asSource()}] io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.ChildRolledBackException: Child failure occurred while suspended in step [1]"</ID>
+    <ID>MaxLineLength:RollbackPathTest.kt$RollbackPathTest$"[${rootHandlerCoroutine.identifier.asSource()}] io.github.gabrielshanahan.scoop.shared.coroutine.structuredcooperation.ParentSaidSoException: &lt;no message&gt;"</ID>
+    <ID>MaxLineLength:RollbackPathTest.kt$RollbackPathTest.RollbackRequests$fun</ID>
+    <ID>MaxLineLength:SqlTestUtils.kt$SqlTestUtils$"INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage) VALUES (:message_id, 'EMITTED', :coroutine_name, :coroutine_identifier, :step, :cooperation_lineage) RETURNING id"</ID>
+    <ID>MemberNameEqualsClassName:PendingCoroutineRunSqlTest.kt$PendingCoroutineRunSqlTest.CandidateSeensWaitingToBeProcessed.NoStrategy$val noStrategy = object : EventLoopStrategy { override fun start(emitted: String) = "TRUE" override fun resumeHappyPath( candidateSeen: String, emittedInLatestStep: String, childSeens: String, ) = "TRUE" override fun giveUpOnHappyPath(seen: String): String = "SELECT NULL WHERE FALSE" override fun resumeRollbackPath( candidateSeen: String, rollbacksEmittedInLatestStep: String, childRollingBacks: String, ) = "TRUE" override fun giveUpOnRollbackPath(seen: String): String = "SELECT NULL WHERE FALSE" }</ID>
+    <ID>MemberNameEqualsClassName:PendingCoroutineRunSqlTest.kt$PendingCoroutineRunSqlTest.CandidateSeensWaitingToBeProcessed.RegistryStrategy$val registryStrategy = StandardEventLoopStrategy(OffsetDateTime.now()) { mapOf( rootTopic to listOf(rootHandler), childTopic1 to listOf(childHandler1, childHandler2), ) }</ID>
+    <ID>MemberNameEqualsClassName:PendingCoroutineRunSqlTest.kt$PendingCoroutineRunSqlTest.FinalSelect$val finalSelect = finalSelect(registryStrategy)</ID>
+    <ID>MemberNameEqualsClassName:PendingCoroutineRunSqlTest.kt$PendingCoroutineRunSqlTest.SeenForProcessing$val seenForProcessing = seenForProcessing(registryStrategy)</ID>
+    <ID>ReturnCount:CooperationContextMap.kt$CooperationContextMap$@Suppress("UNCHECKED_CAST") override fun &lt;E : CooperationContext.Element&gt; get(key: CooperationContext.Key&lt;E&gt;): E?</ID>
+    <ID>ThrowsCount:EventLoop.kt$EventLoop$fun tick(topic: String, distributedCoroutine: DistributedCoroutine)</ID>
+    <ID>ThrowsCount:RollbackPathTest.kt$RollbackPathTest$@Test fun `a handler failing in its second step should emit ROLLBACK_EMITTEDs for messages emitted in the first step, and then roll it back`()</ID>
+    <ID>ThrowsCount:RollbackPathTest.kt$RollbackPathTest$@Test fun `failed rollbacks are well behaved n-deep`()</ID>
+    <ID>ThrowsCount:RollbackPathTest.kt$RollbackPathTest$@Test fun `when a child fails, rollbacks happen in reverse order`()</ID>
+    <ID>ThrowsCount:RollbackPathTest.kt$RollbackPathTest$@Test fun `when a later step fails, previous emissions are rolled back`()</ID>
+    <ID>ThrowsCount:RollbackPathTest.kt$RollbackPathTest.HandleChildFailures$@Test fun `when stuff is emitted in handleChildFailures and then a rollback happens, all things that haven't already been rolled back are rolled back`()</ID>
+    <ID>TooGenericExceptionCaught:CooperationContinuation.kt$BaseCooperationContinuation$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:EventLoop.kt$EventLoop$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:TryFinally.kt$e: Exception</ID>
+    <ID>TooGenericExceptionThrown:ContextPropagationTest.kt$ContextPropagationTest$throw RuntimeException("Failure")</ID>
+    <ID>TooGenericExceptionThrown:MessageEventsTest.kt$MessageEventsTest$throw RuntimeException("Simulated failure for event sequence test")</ID>
+    <ID>TooGenericExceptionThrown:MessageEventsTest.kt$MessageEventsTest$throw RuntimeException("Simulated failure to test rollback")</ID>
+    <ID>TooGenericExceptionThrown:RollbackPathTest.kt$RollbackPathTest$throw RuntimeException("Simulated failure to test rollback")</ID>
+    <ID>TooGenericExceptionThrown:RollbackPathTest.kt$RollbackPathTest.HandleChildFailures$throw RuntimeException("Simulated failure to test rollback")</ID>
+    <ID>TooGenericExceptionThrown:TryFinallyTest.kt$TryFinallyTest$throw RuntimeException("Simulated failure to test rollback")</ID>
+    <ID>UnusedPrivateClass:Capabilities.kt$Capabilities : ScopeCapabilitiesStructuredCooperationCapabilities</ID>
+  </CurrentIssues>
+</SmellBaseline>
