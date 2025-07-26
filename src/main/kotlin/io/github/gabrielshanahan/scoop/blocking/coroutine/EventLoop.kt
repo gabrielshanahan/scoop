@@ -356,7 +356,8 @@ class EventLoop(
                             // Normal execution, no failures anywhere
                             RollbackState.Gucci
                         } else {
-                            // There were no children to roll back in this step
+                            // There were no children to roll back in the previous step,
+                            // or a rollback just started
                             RollbackState.SuccessfullyRolledBackLastStep(rollingBackException)
                         }
                     }

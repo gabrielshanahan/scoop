@@ -8,19 +8,17 @@ import io.github.gabrielshanahan.scoop.shared.coroutine.DistributedCoroutineIden
 import io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.EventLoopStrategy
 
 /**
- * Fluent DSL builder for creating distributed sagas with structured cooperation.
+ * Fluent DSL builder for creating distributed sagas participating in structured cooperation.
  * 
- * [SagaBuilder] provides a clean, readable way to define [DistributedCoroutine] instances that
- * implement the saga pattern with structured cooperation semantics. The builder creates sagas
- * as sequences of [TransactionalStep]s that can emit messages, handle failures, and coordinate
- * rollbacks across service boundaries.
+ * [SagaBuilder] provides a clean, readable way to define [DistributedCoroutine] instances, which
+ * is how Scoop implements the saga pattern - as sequences of [TransactionalStep]s.
  * 
  * ## Usage Pattern
  * 
  * The builder is typically used through the [saga] function which provides the DSL entry point:
  * 
  * ```kotlin
- * val orderSaga = saga("order-processor", StandardEventLoopStrategy()) {
+ * val orderSaga = saga("order-processor", someEventLoopStrategyInstance) {
  *     step("validate-order") { scope, message ->
  *         val order = parseOrder(message.payload)
  *         validateOrderData(order)
@@ -36,7 +34,10 @@ import io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.Event
  * 
  * messageQueue.subscribe("order-topic", orderSaga)
  * ```
- * 
+ * In Scoop, a dummy implementation of [EventLoopStrategy] is provided by
+ * [HandlerRegistry.eventLoopStrategy()][io.github.gabrielshanahan.scoop.blocking.messaging.eventLoopStrategy].
+ * For more information, read about the ["who is listening" problem](https://developer.porn/posts/implementing-structured-cooperation/#building-and-maintaining-a-handler-topology).
+ *
  * ## Step Definition Methods
  * 
  * The builder provides several overloaded [step] methods for different use cases:
@@ -45,20 +46,12 @@ import io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.Event
  * - **Step with error handling**: Includes child failure handling logic
  * - **Named steps**: Explicit step names for better tracking and debugging
  * 
- * ## Structured Cooperation Integration
- * 
- * Each step in a saga built with this DSL automatically participates in structured cooperation:
- * - Steps suspend after completion until child handlers finish
- * - Rollbacks execute in reverse order with proper exception propagation
- * - Context data flows through the cooperation lineage
- * - Failures bubble up the cooperation hierarchy
- * 
  * ## Database Integration
  * 
  * The saga name becomes the `coroutine_name` in the `message_event` table, enabling
  * tracking and debugging of saga executions across the distributed system.
  * 
- * For detailed examples and patterns, see the test files and the blog posts:
+ * For more examples or information, see the test files and the blog posts:
  * - https://developer.porn/posts/introducing-structured-cooperation/
  * - https://developer.porn/posts/implementing-structured-cooperation/
  */
@@ -119,12 +112,13 @@ class SagaBuilder(val name: String, val eventLoopStrategy: EventLoopStrategy) {
  * Creates a distributed saga using the builder DSL.
  * 
  * This is the main entry point for defining sagas in Scoop. It creates a [SagaBuilder]
- * instance, applies the provided configuration block, and builds the resulting [DistributedCoroutine].
+ * instance, applies the provided configuration lambda to it, and builds the resulting
+ * [DistributedCoroutine].
  * 
  * ## Basic Usage
  * 
  * ```kotlin
- * val mySaga = saga("handler-name", StandardEventLoopStrategy()) {
+ * val mySaga = saga("handler-name", someEventLoopStrategyInstance) {
  *     step { scope, message ->
  *         // Process message and emit child messages
  *         scope.launch("child-topic", childMessage)
@@ -134,10 +128,10 @@ class SagaBuilder(val name: String, val eventLoopStrategy: EventLoopStrategy) {
  * messageQueue.subscribe("input-topic", mySaga)
  * ```
  * 
- * ## Advanced Usage with Rollback
+ * ## Advanced Usage with rollback and name
  * 
  * ```kotlin
- * val transactionalSaga = saga("payment-processor", StandardEventLoopStrategy()) {
+ * val transactionalSaga = saga("payment-processor", someEventLoopStrategyInstance) {
  *     step(
  *         name = "charge-card",
  *         invoke = { scope, message ->
@@ -152,7 +146,7 @@ class SagaBuilder(val name: String, val eventLoopStrategy: EventLoopStrategy) {
  * ```
  * 
  * @param name Unique name for this saga type (used in message_event table)
- * @param eventLoopStrategy Strategy that determines when this saga should run
+ * @param eventLoopStrategy Strategy that determines various aspects of when and how this saga will execute
  * @param block Configuration block that defines the saga's steps
  * @return A [DistributedCoroutine] ready to be subscribed to a message topic
  */

@@ -4,37 +4,64 @@ import io.github.gabrielshanahan.scoop.blocking.messaging.Message
 import io.github.gabrielshanahan.scoop.shared.coroutine.continuation.ContinuationIdentifier
 
 /**
- * Represents a "slice" of a saga that can be executed - essentially a resumable function.
+ * Represents the execution of a single step within a saga - a delimited continuation.
  * 
- * A [Continuation] is a fundamental concept in computer science that represents a computation
- * that can be paused and resumed. In Scoop, continuations represent the execution state of
- * a saga at a specific suspension point.
+ * ## What is a Continuation?
  * 
- * ## Suspension Points
+ * A **Continuation** is a fundamental concept in computer science that represents "the rest of
+ * the computation" from a given point. A **delimited continuation** represents only a portion
+ * of that computation - bounded by specific start and end points. Think of it like a single page
+ * in a book rather than "everything from here to the end".
+ *
+ * In Scoop, a [Continuation] is a delimited continuation that represents the next step to be
+ * executed - from "just before the next step" (i.e., just after all child handlers from the
+ * last step have finished) to "after that step finishes executing, just before the transaction
+ * commits". The most important part of a [Continuation] is [resumeWith], which is what actually
+ * executes the step in question.
+ *
+ * ## Delimited Nature
  * 
- * **Important**: Suspension points occur just AFTER a step finishes but BEFORE the next
- * step starts. This is crucial for understanding when a saga can be resumed - it's not
- * in the middle of executing a step, but rather between steps.
+ * Scoop's continuations are delimited because:
+ * - They execute exactly **one step** of the saga
+ * - After executing that step, they return control to the
+ * [EventLoop][io.github.gabrielshanahan.scoop.blocking.coroutine.EventLoop]
+ * - The EventLoop then creates a new continuation for the next step (if needed)
+ * - This creates natural suspension points between each step
+ * 
+ * ## Suspension Points in Scoop
+ * 
+ * **Important**: Suspension points occur just AFTER a step finishes executing and emitting
+ * messages, but BEFORE the next step begins. A [Continuation] represents the execution from
+ * one suspension point to the next - it handles any child failures from the previous step,
+ * then executes the next step, then suspends again.
  * 
  * ## Execution Flow
  * 
- * The EventLoop creates continuations and resumes them with information about what happened
- * in the previous step (success, failure, or rollback completion). The continuation then:
- * 1. Determines what the next step should be
- * 2. Executes that step  
- * 3. Returns a result indicating what should happen next
- * 
+ * The [EventLoop][io.github.gabrielshanahan.scoop.blocking.coroutine.EventLoop] creates continuations
+ * and resumes them with information about what happened in the previous step (success, failure, or
+ * rollback completion). The continuation then:
+ * 1. **Handles child failures first**: If there were failures from child handlers of the
+ * previous step, the continuation processes these through
+ * [TransactionalStep.handleChildFailures][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.handleChildFailures].
+ * If this handling fails (throws an exception), the continuation stops here and returns the
+ * failure.
+ * 2. **Executes the corresponding step**: If child failure handling succeeds (or there were no
+ * child failures), executes the specific step determined by the continuation type - either the
+ * next forward step ([HappyPathContinuation]) or the next rollback step ([RollbackPathContinuation])
+ * 3. **Returns control**: Provides the [EventLoop][io.github.gabrielshanahan.scoop.blocking.coroutine.EventLoop]
+ * with a result (suspend, success, or failure)
+ *
+ * See [EventLoop.resumeCoroutine][io.github.gabrielshanahan.scoop.blocking.coroutine.EventLoop.resumeCoroutine]
+ * for details.
+ *
  * ## Types of Continuations
  * 
  * There are two main types of continuations in Scoop:
- * - [HappyPathContinuation]: For normal forward execution of saga steps
- * - [RollbackPathContinuation]: For executing compensating actions during rollback
+ * - [HappyPathContinuation]: For executing the next forward step in the saga
+ * - [RollbackPathContinuation]: For executing the next rollback step (compensating action)
  * 
- * For background on the continuation concept, see the glossary in the README.
- * 
- * **Important**: Suspension points occur just AFTER a step finishes but BEFORE the next
- * step starts. This is crucial for understanding when a saga can be resumed - it's not
- * in the middle of executing a step, but rather between steps.
+ * Each continuation encapsulates the logic for executing exactly one step in its respective
+ * execution mode (forward or rollback), then returns control to the EventLoop.
  */
 interface Continuation {
 
@@ -50,12 +77,17 @@ interface Continuation {
      * Resumes execution of the saga with the result from the previous step.
      * 
      * This is the core method that drives saga execution. It receives information about
-     * what happened in the previous step and determines what to do next:
+     * what happened in the previous step and then:
      * 
-     * - Execute the next step in the saga
-     * - Handle failures from child sagas  
-     * - Complete the saga successfully
-     * - Enter rollback mode
+     * 1. **Handles child failures first** (if any) through
+     * [TransactionalStep.handleChildFailures][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.handleChildFailures].
+     * 2. **Executes the predetermined step** based on the continuation type:
+     *    - [HappyPathContinuation]: Executes the next forward step
+     *    - [RollbackPathContinuation]: Executes the next rollback step (compensating action)
+     * 
+     * The continuation doesn't dynamically determine what step to execute - that was decided
+     * when the EventLoop chose which continuation type to create. The continuation either
+     * fails during child failure handling or executes its predetermined step type.
      * 
      * @param lastStepResult What happened in the previous step (success, failure, or rollback)
      * @return What should happen next (suspend, success, or failure)
@@ -66,7 +98,7 @@ interface Continuation {
      * Represents the outcome of the previous step execution.
      * 
      * This is passed to [resumeWith] to inform the continuation about what happened
-     * in the previous step, allowing it to decide what to do next.
+     * in the previous step.
      */
     sealed interface LastStepResult {
         /** The message that was being processed */
@@ -75,28 +107,41 @@ interface Continuation {
         /**
          * The previous step completed successfully.
          * 
-         * This means the step's [TransactionalStep.invoke] method completed without
-         * throwing an exception, and any child handlers have finished successfully.
+         * This means the step's
+         * [TransactionalStep.invoke][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.invoke]
+         * method completed without throwing an exception, and all child handlers
+         * (if any) also finished successfully.
          */
         data class SuccessfullyInvoked(override val message: Message) : LastStepResult
 
         /**
-         * The previous step completed its rollback successfully.
+         * The saga is ready to proceed with rollback execution.
          * 
-         * This means the step's [TransactionalStep.rollback] method completed without
-         * throwing an exception. The [throwable] is the original exception that caused
-         * the rollback to begin.
+         * **Important**: This does NOT necessarily mean a previous rollback step has completed!
+         * This result covers two distinct scenarios:
+         * 
+         * 1. **Rollback step completed**: The previous step's 
+         * [TransactionalStep.rollback][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.rollback]
+         * method executed and completed without throwing an exception
+         * 
+         * 2. **Rollback just started**: A ROLLING_BACK event was written to initiate rollback mode,
+         * and we're about to execute the first rollback step (no actual rollback step has run yet)
+         * 
+         * However, from the continuation's perspective, both scenarios mean the same thing: "proceed with
+         * executing the next rollback step." The [throwable] is the original exception that 
+         * caused the rollback to begin.
          */
         data class SuccessfullyRolledBack(override val message: Message, val throwable: Throwable) :
             LastStepResult
 
         /**
-         * The previous step failed (or child handlers failed and weren't handled).
+         * Child handlers from the previous step failed.
          * 
-         * This indicates that either:
-         * - The step's [TransactionalStep.invoke] method threw an exception
-         * - Child handlers failed and [TransactionalStep.handleChildFailures] re-threw the exception  
-         * - The step's [TransactionalStep.rollback] method threw an exception during rollback
+         * This indicates that the previous step's
+         * [TransactionalStep.invoke][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.invoke]
+         * method completed successfully and committed, but one or more child handlers that were
+         * spawned by emitting messages failed. The step itself did not fail - if it had, the
+         * transaction would never have committed and there would be nothing to roll back.
          */
         data class Failure(override val message: Message, val throwable: Throwable) :
             LastStepResult
@@ -105,47 +150,47 @@ interface Continuation {
     /**
      * Represents the outcome of resuming the continuation.
      * 
-     * This tells the EventLoop what happened when the continuation was resumed
-     * and what should happen next.
+     * This tells the [EventLoop][io.github.gabrielshanahan.scoop.blocking.coroutine.EventLoop]
+     * what happened when the continuation was resumed and what should happen next.
      */
     sealed interface ContinuationResult {
         /**
-         * The saga executed a step and is now suspended, waiting for child handlers to complete.
+         * The saga successfully executed a step (normal or rollback) and should now be suspended, waiting
+         * for child handlers to complete (or, more generally, for the
+         * [EventLoopStrategy][io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.EventLoopStrategy]
+         * to say it should resume).
          * 
-         * This is the normal result when a step completes successfully and emits messages.
+         * This is the normal result when a step completes successfully.
          * The saga will remain suspended until all handlers of the [emittedMessages] have
          * finished executing, at which point it can be resumed again.
-         * 
-         * **Note**: EMITTED events are recorded at the end of each step regardless of the
-         * step's outcome - this ensures that message emission is always tracked for
-         * structured cooperation to work correctly.
-         * 
+         *
          * @param emittedMessages Messages that were emitted during this step's execution
-         * 
-         * **Important**: EMITTED events are recorded at the end of each step regardless of the
-         * step's outcome. This ensures that message emission is always tracked for structured
-         * cooperation to work correctly.
          */
         data class Suspend(val emittedMessages: List<Message>) : ContinuationResult
 
         /**
          * The saga completed successfully.
          * 
-         * This indicates that all steps in the saga have been executed successfully
-         * and the saga has reached its natural conclusion. No more processing is needed.
+         * This indicates that all steps in the saga have finished executing successfully
+         * and the saga has reached its natural conclusion.
          */
         data object Success : ContinuationResult
 
         /**
-         * The saga failed with an unhandled exception.
+         * The step failed with an unhandled exception.
          * 
          * This indicates that either:
-         * - A step threw an exception that wasn't handled by [TransactionalStep.handleChildFailures]
-         * - A rollback operation failed
-         * - Some other unrecoverable error occurred
+         * - A child threw an exception that wasn't handled by
+         * [TransactionalStep.handleChildFailures][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.handleChildFailures]
+         * - An unhandled exception was thrown in the step
+         * ([TransactionalStep.invoke][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.invoke]
+         * or
+         * [TransactionalStep.rollback][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.rollback])
          * 
-         * When this result is returned, the EventLoop will initiate rollback processing
-         * or mark the saga as failed, depending on the current execution state.
+         * When this result is returned, the
+         * [EventLoop][io.github.gabrielshanahan.scoop.blocking.coroutine.EventLoop]
+         * will initiate rollback processing or mark the saga as failed, depending
+         * on the current execution state.
          */
         data class Failure(val exception: Throwable) : ContinuationResult
     }
