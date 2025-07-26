@@ -70,7 +70,7 @@ class MessageEventsTest : StructuredCooperationTest() {
                 )
                 .single()
 
-        Assertions.assertEquals("EMITTED".toString(), handlerRecorded.getString("type"))
+        Assertions.assertEquals("EMITTED", handlerRecorded.getString("type"))
     }
 
     @Test

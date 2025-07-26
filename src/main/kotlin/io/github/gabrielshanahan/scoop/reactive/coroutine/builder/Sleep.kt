@@ -47,7 +47,7 @@ class SleepEventLoopStrategy(ignoreOlderThan: OffsetDateTime) :
         candidateSeen: String,
         rollbacksEmittedInLatestStep: String,
         childRollingBacks: String,
-    ): String = "FALSE"
+    ): String = "TRUE"
 }
 
 fun SagaBuilder.sleepForStep(name: String, duration: Duration) {

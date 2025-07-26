@@ -13,18 +13,12 @@ import java.sql.Connection
  * 
  * This continuation handles the "happy path" - when sagas are executing their steps
  * in the normal forward direction (as opposed to rolling back). It executes the
- * [TransactionalStep.invoke] methods and handles child failures via
- * [TransactionalStep.handleChildFailures].
- * 
- * The happy path continuation moves through the saga's steps in order:
- * 1. Execute step N's [TransactionalStep.invoke] method
- * 2. Suspend and wait for child handlers to complete
- * 3. If children succeed, move to step N+1
- * 4. If children fail, call step N's [TransactionalStep.handleChildFailures]
- * 5. If that handles the failure, continue; if not, enter rollback mode
- * 
- * @see RollbackPathContinuation for rollback execution
- * @see BaseCooperationContinuation for shared continuation logic
+ * [TransactionalStep.invoke][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.invoke]
+ * methods and handles child failures via
+ * [TransactionalStep.handleChildFailures][io.github.gabrielshanahan.scoop.blocking.coroutine.TransactionalStep.handleChildFailures].
+ *
+ * However, all this is done in the parent [BaseCooperationContinuation]. Here, we
+ * only specialize the [giveUpStrategy], as that's all that's needed.
  */
 internal class HappyPathContinuation(
     connection: Connection,
@@ -59,8 +53,8 @@ internal class HappyPathContinuation(
  * - **Suspended after last step**: Create a continuation that will complete the saga
  * 
  * @param connection Database connection for the continuation's transaction
- * @param coroutineState Current state of the saga (which step, context, etc.)
- * @param scopeCapabilities Handles message emission and cooperation logic
+ * @param coroutineState Current state of the saga run (which step, context, etc.)
+ * @param scopeCapabilities Provides capabilities exposed by [CooperationScope][io.github.gabrielshanahan.scoop.blocking.coroutine.CooperationScope]
  * @return A happy path continuation ready to resume execution
  */
 internal fun DistributedCoroutine.buildHappyPathContinuation(
@@ -70,7 +64,7 @@ internal fun DistributedCoroutine.buildHappyPathContinuation(
 ) =
     when (coroutineState.lastSuspendedStep) {
         is LastSuspendedStep.NotSuspendedYet -> {
-            // No SUSPEND record, so we've just started processing this message
+            // Case 1: Not suspended yet - Create a continuation to execute the first step
             HappyPathContinuation(
                 connection,
                 coroutineState.cooperationContext,
@@ -90,6 +84,7 @@ internal fun DistributedCoroutine.buildHappyPathContinuation(
             }
 
             if (steps[suspendedStepIdx] == steps.last()) {
+                // Case 2: Suspended after last step - Create a continuation that will complete the saga
                 HappyPathContinuation(
                     connection,
                     coroutineState.cooperationContext,
@@ -99,6 +94,7 @@ internal fun DistributedCoroutine.buildHappyPathContinuation(
                     scopeCapabilities,
                 )
             } else {
+                // Case 3: Suspended after a step - Create a continuation to execute the next step
                 HappyPathContinuation(
                     connection,
                     coroutineState.cooperationContext,

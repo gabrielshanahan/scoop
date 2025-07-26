@@ -4,47 +4,43 @@ import io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.Event
 import org.intellij.lang.annotations.Language
 
 /**
- * Complex SQL queries that implement structured cooperation's core logic for determining saga readiness.
+ * HIC SVNT DRACONES
+ *
+ * An SQL query that implement structured cooperation's core logic for determining saga readiness.
+ * This is the heart of Scoop.
  * 
- * This file contains the ~500 lines of SQL that implement the heart of structured cooperation.
  * The queries determine when a saga is ready to proceed to its next step based on the fundamental
- * rule: "sagas suspend after completing a step and don't continue until all handlers of emitted
- * messages have finished executing."
+ * rule of structured cooperation: "sagas suspend after completing a step and don't continue until
+ * all handlers of emitted messages have finished executing."
  * 
  * ## Query Architecture
  * 
- * The queries are built as a series of Common Table Expressions (CTEs) that progressively filter
+ * The query is built from a series of Common Table Expressions (CTEs) that progressively filter
  * and analyze the message_event table to find sagas ready for execution:
  * 
- * 1. **[candidateSeens]**: Find SEEN events for sagas that aren't completed yet
- * 2. **[latestSuspended]**: Get the latest SUSPENDED event for each candidate
- * 3. **[childEmissionsInLatestStep]**: Find messages emitted in the latest step
- * 4. **[childSeens]**: Find child handlers for those emissions
- * 5. **[terminatedChildSeens]**: Filter to only completed child handlers
- * 6. **[candidateSeensWaitingToBeProcessed]**: Apply structured cooperation rules
- * 7. **[seenForProcessing]**: Lock and select one saga for processing
- * 8. **[finalSelect]**: Gather all data needed to build the continuation
- * 
- * ## Structured Cooperation Rules
- * 
- * The queries implement two main scenarios:
- * - **Happy Path**: All child handlers must be terminated (COMMITTED/ROLLED_BACK/ROLLBACK_FAILED)
- * - **Rollback Path**: All child rollbacks must be terminated (ROLLED_BACK/ROLLBACK_FAILED)
+ * 1. [candidateSeens]: Find SEEN events for saga runs that aren't completed yet
+ * 2. [latestSuspended]: Get the latest SUSPENDED event for each candidate
+ * 3. **Find child operations**: Locate child sagas triggered in latest step
+ *    - [childEmissionsInLatestStep]: Find messages emitted in the latest step
+ *    - [childSeens]: Find happy path continuation starts for those emissions
+ *    - [childRollbackEmissionsInLatestStep]: Find rollback messages from latest step
+ *    - [childRollingBacks]: Find rollback path continuation starts for those emissions
+ * 4. **Check completion status**: Verify child operations are done
+ *    - [terminatedChildSeens]: Filter to only completed child handlers
+ *    - [terminatedChildRollingBacks]: Filter to only completed child rollbacks
+ * 5. [candidateSeensWaitingToBeProcessed]: Apply structured cooperation rule & [EventLoopStrategy] constraints
+ * 6. **Select and lock**: Choose one saga for execution
+ *    - [seenForProcessing]: Lock and select one saga for processing
+ *    - [lastTwoEvents]: Get the events necessary for correct cooperation context reconstruction (see
+ *                       [EventLoop.fetchSomePendingCoroutineState][io.github.gabrielshanahan.scoop.blocking.coroutine.EventLoop.fetchSomePendingCoroutineState])
+ *    - [finalSelect]: Gather all data needed to build the continuation
  * 
  * ## EventLoopStrategy Integration
  * 
- * The [EventLoopStrategy] can override the default rules by providing custom SQL conditions for:
- * - When to resume on happy path vs give up
- * - When to resume on rollback path vs give up  
+ * The [EventLoopStrategy] provides SQL that determines:
+ * - When to resume on happy path vs. give up
+ * - When to resume on rollback path vs. give up
  * - When to start processing messages (filtering old messages, etc.)
- * 
- * ## Performance Considerations
- * 
- * These queries operate on the message_events table which can grow large in production. The
- * cooperation_lineage array column and proper indexing are crucial for performance.
- * 
- * For background on the structured cooperation principles implemented here, see:
- * https://developer.porn/posts/implementing-structured-cooperation/
  */
 
 /**
@@ -58,16 +54,16 @@ data class SQL(val cte: SQL?, val name: String?, @Language("PostgreSQL") val sql
 fun SQL.appendAs(name: String?, @Language("PostgreSQL") sql: String): SQL = SQL(this, name, sql)
 
 /**
- * Finds all SEEN events for sagas that are not yet completed.
+ * Finds all `SEEN` events for sagas that are not yet completed.
  * 
  * This is the foundation query that identifies saga executions that might be ready to proceed.
  * It finds SEEN events (representing active saga instances) that haven't reached a terminal
- * state yet (COMMITTED, ROLLED_BACK, or ROLLBACK_FAILED).
+ * state yet (`COMMITTED`, `ROLLED_BACK`, or `ROLLBACK_FAILED`).
  * 
- * The query handles three execution states:
+ * The query handles three execution states (the last two are kept separate for clarity):
  * 1. **Happy path execution**: No rollback events, not yet committed
- * 2. **Rolling back**: Has ROLLING_BACK event but not yet rolled back
- * 3. **Rollback requested**: Has ROLLBACK_EMITTED and ROLLING_BACK, not yet complete
+ * 2. **Rolling back**: Has `ROLLING_BACK` event but not yet rolled back
+ * 3. **Rollback requested**: Has `ROLLBACK_EMITTED` and `ROLLING_BACK`, not yet complete
  */
 val candidateSeens =
     SQL(
@@ -127,6 +123,13 @@ val candidateSeens =
             .trimIndent(),
     )
 
+/**
+ * Gets the latest `SUSPENDED` event for each candidate saga.
+ * 
+ * This query finds the most recent step where each candidate saga suspended execution.
+ * The step name and context from this event determine which child sagas to look for
+ * and what step the saga should proceed with, should it be picked.
+ */
 val latestSuspended =
     candidateSeens.appendAs(
         "latest_suspended",
@@ -140,6 +143,13 @@ val latestSuspended =
             .trimIndent(),
     )
 
+/**
+ * Finds all messages emitted during the latest suspended step.
+ * 
+ * This query locates the `EMITTED` events created in the step where each
+ * candidate saga most recently suspended. These emissions represent the
+ * child saga runs that must complete before the parent saga can proceed.
+ */
 val childEmissionsInLatestStep =
     latestSuspended.appendAs(
         "child_emissions_in_latest_step",
@@ -154,6 +164,13 @@ val childEmissionsInLatestStep =
             .trimIndent(),
     )
 
+/**
+ * Finds child handler `SEEN` events for emissions from the latest step.
+ * 
+ * This query locates `SEEN` events that represent child handlers starting to process
+ * messages emitted in the latest suspended step. The `WHERE` conditions ensure we only
+ * get direct child handlers (cooperation lineage is exactly one level deeper).
+ */
 val childSeens =
     childEmissionsInLatestStep.appendAs(
         "child_seens",
@@ -170,6 +187,13 @@ val childSeens =
             .trimIndent(),
     )
 
+/**
+ * Filters child handlers to only those that have completed execution.
+ * 
+ * This query identifies child SEEN events that have reached a terminal state
+ * (`COMMITTED`, `ROLLED_BACK`, or `ROLLBACK_FAILED`). Only when all child handlers
+ * are terminated can the parent saga proceed, according to structured cooperation rules.
+ */
 val terminatedChildSeens =
     childSeens.appendAs(
         "terminated_child_seens",
@@ -185,6 +209,13 @@ val terminatedChildSeens =
             .trimIndent(),
     )
 
+/**
+ * Finds rollback messages emitted during the latest suspended step.
+ * 
+ * This query locates `ROLLBACK_EMITTED` events created in the step where each
+ * candidate saga most recently suspended. These represent rollback requests
+ * that child handlers must process before the parent can proceed on the rollback path.
+ */
 val childRollbackEmissionsInLatestStep =
     terminatedChildSeens.appendAs(
         "child_rollback_emissions_in_latest_step",
@@ -199,6 +230,13 @@ val childRollbackEmissionsInLatestStep =
             .trimIndent(),
     )
 
+/**
+ * Finds child handler `ROLLING_BACK` events for direct child operations.
+ * 
+ * This query locates `ROLLING_BACK` events that represent child handlers starting
+ * to process rollback requests. The `WHERE` conditions ensure we only get direct
+ * child handlers (cooperation lineage is exactly one level deeper).
+ */
 val childRollingBacks =
     childRollbackEmissionsInLatestStep.appendAs(
         "child_rolling_backs",
@@ -217,6 +255,13 @@ val childRollingBacks =
             .trimIndent(),
     )
 
+/**
+ * Filters child rollback handlers to only those that have completed.
+ * 
+ * This query identifies child `ROLLING_BACK` events that have reached a terminal
+ * rollback state (`ROLLED_BACK` or `ROLLBACK_FAILED`). Only when all child rollbacks
+ * are terminated can the parent saga proceed on the rollback path.
+ */
 val terminatedChildRollingBacks =
     childRollingBacks.appendAs(
         "terminated_child_rolling_backs",
@@ -232,6 +277,24 @@ val terminatedChildRollingBacks =
             .trimIndent(),
     )
 
+/**
+ * Applies structured cooperation rules and [EventLoopStrategy] constraints to determine saga readiness.
+ * 
+ * This is the core logic that implements structured cooperation's fundamental rule. It determines
+ * which candidate sagas are ready to proceed by checking:
+ * 
+ * **Happy Path**: All child `SEEN` events have terminated (in `terminated_child_seens`)
+ * and [EventLoopStrategy] says we can [resume][EventLoopStrategy.resumeHappyPath] or
+ * [give up][EventLoopStrategy.giveUpOnHappyPath].
+ * **Rollback Path**: All child `ROLLING_BACK` events have terminated (in
+ * `terminated_child_rolling_backs`) and [EventLoopStrategy] says we can
+ * [resume][EventLoopStrategy.resumeRollbackPath] or [give up][EventLoopStrategy.giveUpOnRollbackPath]
+ * 
+ * The way [EventLoopStrategy] implements these methods gives rise to various features, such as
+ * timeouts and cancellations.
+ *
+ * @see io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.StandardEventLoopStrategy
+ */
 fun candidateSeensWaitingToBeProcessed(eventLoopStrategy: EventLoopStrategy) =
     terminatedChildRollingBacks.appendAs(
         "candidate_seens_waiting_to_be_processed",
@@ -303,6 +366,16 @@ fun candidateSeensWaitingToBeProcessed(eventLoopStrategy: EventLoopStrategy) =
             .trimIndent(),
     )
 
+/**
+ * Locks and selects one ready saga for processing.
+ * 
+ * This function implements the final selection and locking step. It orders ready
+ * sagas by emission time (rollbacks after normal emissions) and uses FOR UPDATE SKIP LOCKED
+ * to prevent concurrent processing. The [secondRunAfterLock] parameter is tied to the
+ * double-checked locking pattern used in
+ * [MessageEventRepository.fetchPendingCoroutineRun][io.github.gabrielshanahan.scoop.blocking.coroutine.structuredcooperation.MessageEventRepository.fetchPendingCoroutineRun],
+ * and distinguishes which "pass" we're currently running.
+ */
 fun seenForProcessing(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolean = false) =
     if (!secondRunAfterLock) {
         candidateSeensWaitingToBeProcessed(eventLoopStrategy)
@@ -334,6 +407,23 @@ fun seenForProcessing(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: 
             )
     }
 
+/**
+ * Retrieves the last two events for proper
+ * [CooperationContext][io.github.gabrielshanahan.scoop.shared.coroutine.context.CooperationContext]
+ * reconstruction.
+ *
+ * The context is always taken from the last thing the saga performed, whatever that might be. For
+ * "normal" situations where we're in the middle of a saga run, that context is contained in the last
+ * `SUSPENDED` record, or alternatively the `SEEN` if the saga hasn't started yet.
+ *
+ * However, there is one situation in which we actually need to two last steps, which is when a rollback
+ * that was triggered by the *parent* (i.e., a downstream failure, and not by this saga itself) is just starting.
+ *
+ * In those situations, the last step is a `ROLLING_BACK`, and the context contained in it is the one that
+ * is "sent in from the top", i.e., from whatever triggered the rollback. However, we also want to take into
+ * account whatever the context was in the *actual* last step of this saga, which, in this case, is the
+ * second-to-last event. Out of necessity, that second-to-last event must be `COMMITTED`.
+ */
 fun lastTwoEvents(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolean = false) =
     seenForProcessing(eventLoopStrategy, secondRunAfterLock)
         .appendAs(
@@ -345,13 +435,31 @@ fun lastTwoEvents(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Bool
                 last_two_events.step
             FROM message_event last_two_events
             JOIN seen_for_processing ON seen_for_processing.cooperation_lineage = last_two_events.cooperation_lineage
-            WHERE last_two_events.type IN ('SEEN', 'SUSPENDED', 'COMMITTED', 'ROLLING_BACK') -- These are the event types that can affect continuation state
+            -- See the explanation above to understand why we select these particular types
+            WHERE last_two_events.type IN ('SEEN', 'SUSPENDED', 'COMMITTED', 'ROLLING_BACK')
             ORDER BY last_two_events.created_at DESC
             LIMIT 2
         """
                 .trimIndent(),
         )
 
+/**
+ * Gathers all data needed to build a continuation for the selected saga.
+ *
+ * The only thing of note is `latest_scope_context`, which is an awkward way to express
+ * the "second-to-last" context in situations where it is relevant - see [lastTwoEvents]
+ * above. In that situation, this really represents the "last context used when this scope
+ * ran", while `latest_context` is the last *parent* context used.
+ *
+ * As explained in [lastTwoEvents], the only situation we're interested in this is when:
+ * - the last event was a `ROLLING_BACK`
+ * - the rollback was triggered externally, i.e. not by a failure in this saga. This situation
+ * can be recognized by the `step` being `null`. This can be seen by looking at the INSERT at
+ * the end of [MessageEventRepository.startContinuationsForCoroutine], and noticing that we never
+ * specify the `step`. Contrast that with
+ * [EventLoop.markRollingBackInSeparateTransaction][io.github.gabrielshanahan.scoop.blocking.coroutine.EventLoop.markRollingBackInSeparateTransaction],
+ * which is what writes those events when the failure was caused during the run of this saga.
+ */
 fun finalSelect(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolean = false) =
     lastTwoEvents(eventLoopStrategy, secondRunAfterLock)
         .appendAs(
@@ -363,7 +471,8 @@ fun finalSelect(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolea
                     latest_suspended.step,
                     last_event.context as latest_context,
                     CASE
-                        WHEN last_event.type = 'ROLLING_BACK' AND last_event.step IS NULL THEN second_to_last_event.context -- The step is null which is true only when it's copied from the parent
+                        -- See the explanation above to understand the logic behind this weird-looking selection
+                        WHEN last_event.type = 'ROLLING_BACK' AND last_event.step IS NULL THEN second_to_last_event.context
                     END AS latest_scope_context,
                     (
                         SELECT
@@ -397,10 +506,22 @@ fun finalSelect(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolea
                 .trimIndent(),
         )
 
+/**
+ * Utility function to add a comma to non-empty strings for CTE chaining.
+ */
 fun commatize(str: String) = if (str.isNotBlank()) "$str," else str
 
+/**
+ * Utility function to add `WITH` keyword to non-empty CTE strings.
+ */
 fun withWITH(str: String) = if (str.isNotBlank()) "WITH $str" else str
 
+/**
+ * Recursively builds a CTE chain from nested SQL objects.
+ * 
+ * This extension function converts a chain of SQL objects into a formatted
+ * CTE string, handling the recursive dependency structure.
+ */
 fun SQL?.asCTE(): String =
     when (this) {
         null -> ""
@@ -414,6 +535,12 @@ fun SQL?.asCTE(): String =
                 .trimMargin()
     }
 
+/**
+ * Builds the final SQL query from a chain of CTEs.
+ * 
+ * This function assembles the complete SQL query by combining all CTEs
+ * with the final `SELECT` statement and proper SQL formatting.
+ */
 fun SQL.build(): String =
     """
     |${withWITH(cte.asCTE())}

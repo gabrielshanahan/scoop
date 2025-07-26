@@ -240,13 +240,12 @@ class MessageEventRepository {
                     WHERE NOT EXISTS (
                         SELECT 1
                         FROM message_event seen
-                        LEFT JOIN message_event committed
-                          ON committed.cooperation_lineage = seen.cooperation_lineage
-                             AND committed.type = 'COMMITTED'
-                        WHERE seen.type = 'SEEN'
-                          AND seen.cooperation_lineage <@ $1
-                          AND committed.cooperation_lineage IS NULL
-                          AND cardinality(seen.cooperation_lineage) > 1
+                        LEFT JOIN message_event terminated
+                          ON terminated.cooperation_lineage = seen.cooperation_lineage
+                             AND terminated.type in ('COMMITTED', 'ROLLBACK_FAILED')
+                        WHERE seen.type = 'SEEN'                              
+                          AND seen.cooperation_lineage <@ $1 
+                          AND terminated.cooperation_lineage IS NULL          
                     )
                     ON CONFLICT (message_id, type) WHERE type = 'ROLLBACK_EMITTED' DO NOTHING;
                 """
@@ -261,9 +260,6 @@ class MessageEventRepository {
 
     fun insertCancellationRequestedEvent(
         connection: SqlConnection,
-        coroutineName: String?,
-        coroutineIdentifier: String?,
-        stepName: String?,
         cooperationLineage: List<UUID>,
         exception: CooperationFailure,
     ): Uni<Unit> =
@@ -279,15 +275,16 @@ class MessageEventRepository {
                     INSERT INTO message_event (
                         message_id, 
                         type, 
-                        coroutine_name, 
-                        coroutine_identifier, 
-                        step, 
+                        coroutine_name, coroutine_identifier, step, 
                         cooperation_lineage, 
-                        exception) 
+                        exception
+                    ) 
                     SELECT 
                         message_id_lookup.message_id,
                         'CANCELLATION_REQUESTED',
-                        $2, $3, $4, $1, $5
+                        null, null, null, 
+                        $1, 
+                        $2
                     FROM message_id_lookup
                     ON CONFLICT (cooperation_lineage, type) WHERE type = 'CANCELLATION_REQUESTED' DO NOTHING
                 """
@@ -297,9 +294,6 @@ class MessageEventRepository {
                 Tuple.tuple(
                     listOf(
                         cooperationLineage.toTypedArray(),
-                        coroutineName,
-                        coroutineIdentifier,
-                        stepName,
                         JsonObject.mapFrom(exception),
                     )
                 )

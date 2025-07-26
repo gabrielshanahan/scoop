@@ -306,8 +306,6 @@ class EventLoop(
                         coroutineState.message,
                         coroutineState.rollbackState.throwable,
                     )
-                // TODO: This reads weird, can we have something else that `is
-                // RollbackState.Children.Rollbacks`?
                 is RollbackState.Children.Rollbacks ->
                     Continuation.LastStepResult.Failure(
                         coroutineState.message,

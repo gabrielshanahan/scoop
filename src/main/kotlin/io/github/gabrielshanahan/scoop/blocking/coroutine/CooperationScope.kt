@@ -9,11 +9,19 @@ import java.sql.Connection
 import org.postgresql.util.PGobject
 
 /**
- * The execution environment for a saga step, providing access to message emission and shared context.
+ * An object which is bound to a single run of a saga. It's created anew for each step, since each step
+ * can run in a different service, but conceptually, it always represents the same thing.
  * 
- * A [CooperationScope] represents a "cooperation lineage" - a hierarchical grouping of related saga runs
- * where child runs are consequences of messages emitted by parent runs. This is fundamental to how
- * structured cooperation tracks dependencies between distributed operations.
+ * A [CooperationScope] is fundamentally identified by a "cooperation lineage", which provides a hierarchical
+ * grouping of saga runs. When a saga emits a message using [launch], any handlers that process that message
+ * become "children" of the emitting saga, creating a parent-child relationship. The parent saga will suspend
+ * execution after completing its current step and wait for all child handlers (and their descendants) to
+ * finish before proceeding to its next step (this is governed by the
+ * [EventLoopStrategy][io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.EventLoopStrategy]).
+ * This creates a tree structure where each run represents a node in the tree, and each subtree represents a
+ * single scope grouping together a saga run and all the work it triggers through message emission. This
+ * hierarchical grouping is what enables us to fulfil structured cooperation's fundamental rule: waiting for
+ * children to finish before continuing with the parent.
  * 
  * ## Scope Hierarchy
  * 
@@ -46,11 +54,6 @@ import org.postgresql.util.PGobject
  * The choice between these methods determines whether the emitted message's handler will be part
  * of the current cooperation tree or independent of it. See:
  * https://developer.porn/posts/introducing-structured-cooperation/#what-if-i-dont-want-to-cooperate
- * 
- * **Important**: The scope stays the same for the entire coroutine run! Even including ROLLING_BACK
- * phases. While individual [CooperationScope] instances are created each time the saga resumes
- * (for horizontal scalability), they all represent the same logical scope throughout the saga's
- * complete lifecycle from start to finish.
  */
 interface CooperationScope {
 
@@ -76,8 +79,9 @@ interface CooperationScope {
     /**
      * The continuation object that represents this saga's current execution state.
      * 
-     * In blocking mode, the [CooperationScope] instance is actually the same object as the [Continuation].
-     * This relationship is what allows the scope to manage step execution and state persistence.
+     * In Scoop, the [CooperationScope] instance is actually the same object as the [Continuation] - see
+     * [CooperationContinuation][io.github.gabrielshanahan.scoop.blocking.coroutine.continuation.CooperationContinuation]
+     * for an explanation why that's the case.
      */
     val continuation: Continuation
 
@@ -102,7 +106,7 @@ interface CooperationScope {
      * 
      * This is called internally by the message emission methods to track which messages
      * have been emitted. This tracking is essential for structured cooperation to work,
-     * as it allows the system to know which child handlers need to complete before
+     * as it allows the system to figure out which child handlers need to complete before
      * this saga can proceed to its next step.
      * 
      * @param message The message that was emitted
@@ -114,7 +118,7 @@ interface CooperationScope {
      * 
      * This creates a child cooperation scope for any handlers that process the emitted message.
      * The current saga will suspend after completing its current step and wait for all
-     * handlers of this message (and any messages they emit) to complete before proceeding.
+     * handlers of this message (and any other messages emitted) to complete before proceeding.
      * 
      * This is the primary mechanism for triggering child operations while maintaining
      * structured cooperation guarantees.
@@ -160,13 +164,39 @@ interface CooperationScope {
      * If a cancellation has been requested or a deadline has passed, it throws an appropriate
      * exception to terminate the saga's execution.
      * 
-     * Call this method periodically in long-running steps to enable responsive cancellation.
+     * Call this method periodically in long-running steps to enable cooperative cancellation.
      * 
-     * TODO: DOC that Definition of this should actually be part of step, since
-     *  want to be able to create an uncancellable step. Actually, per-coroutine
-     *  should be enough, especially for a POC. IF you need it for a specific step,
-     *  you can always create one that just emits a message that's consumed by a
-     *  non-cancellable coroutine
+     * ## Creating Non-Cancellable Steps
+     * 
+     * To create a step that never gives up (and [never surrenders](https://www.youtube.com/watch?v=FNLUS0o69wQ)),
+     * emit a message from that step to a dedicated handler with a custom
+     * [EventLoopStrategy][io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.EventLoopStrategy]:
+     * 
+     * ```kotlin
+     * // Custom strategy that ignores cancellation
+     * class NonCancellableStrategy(
+     *     ignoreOlderThan: OffsetDateTime
+     * ) : BaseEventLoopStrategy(ignoreOlderThan) {
+     *     override fun giveUpOnHappyPath(seen: String) = "SELECT NULL WHERE FALSE"
+     *     override fun giveUpOnRollbackPath(seen: String) = "SELECT NULL WHERE FALSE"
+     * }
+     * 
+     * // Register a non-cancellable handler
+     * messageQueue.subscribe("critical-operation", saga("critical-handler") {
+     *     step { scope, message -> 
+     *         // This work cannot be cancelled once started
+     *         performCriticalOperation()
+     *     }
+     * }, NonCancellableStrategy(OffsetDateTime.now().minusHours(1)))
+     * 
+     * // Use it from a regular saga
+     * step { scope, message ->
+     *     scope.launch("critical-operation", message.payload)
+     * }
+     * ```
+     * 
+     * See [SleepEventLoopStrategy][io.github.gabrielshanahan.scoop.blocking.coroutine.builder.SleepEventLoopStrategy] 
+     * for another example of a custom strategy that implements specialized logic.
      */
     fun giveUpIfNecessary()
 }

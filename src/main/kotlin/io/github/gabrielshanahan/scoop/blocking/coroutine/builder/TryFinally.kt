@@ -7,7 +7,7 @@ import io.github.gabrielshanahan.scoop.shared.coroutine.context.CooperationConte
 /**
  * Try-finally semantics for distributed sagas using CooperationContext tracking.
  * 
- * This module provides try-finally resource management patterns that work correctly across
+ * This file provides try-finally-like resource management patterns that work correctly across
  * distributed saga boundaries. It ensures that "finally" blocks run exactly once, whether
  * the saga completes successfully or needs to roll back.
  * 
@@ -46,9 +46,6 @@ import io.github.gabrielshanahan.scoop.shared.coroutine.context.CooperationConte
  * 2. **Finally step**: Runs the finally logic if not already executed
  * 
  * The [TryFinallyElement] in the context tracks which finally blocks have been executed.
- * 
- * For background on structured cooperation resource management, see:
- * https://developer.porn/posts/the-unreasonable-effectiveness-of-structured-cooperation/
  */
 
 /**

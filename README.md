@@ -5,6 +5,7 @@ TODO: Go through notes and update anything necessary
 TODO: Add TOC
 TODO: On review, ask if they can run it
 TODO: Setup sponsor page
+TODO: create RFC
 
 <img src="img.png" alt="An ice-cream scoop icon" width="150"/>
 
@@ -135,7 +136,7 @@ At this point, go back and take a separate look at [CooperationScope](src/main/k
 what capabilities it provides, and why it so happens that the `Continuation` instance can coincide with the `CooperationScope` instance.
 
 Then, take a look at the SQL and `EventLoopStrategy`:
-* The "start continuations" SQL in [StructuredCooperationManager](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/structuredcooperation/StructuredCooperationManager.kt),
+* The "start continuations" SQL in [MessageEventRepository](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/structuredcooperation/MessageEventRepository.kt),
 * The "pending coroutine run" SQL in [PendingCoroutineRunSql](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/structuredcooperation/PendingCoroutineRunSql.kt), and how
   it's influenced by [EventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/eventloop/strategy/EventLoopStrategy.kt),
 * How `EventLoopStrategy` is implemented ([StandardEventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/eventloop/strategy/StandardEventLoopStrategy.kt), ignore
@@ -149,7 +150,8 @@ Finally, learn about individual functionalities:
 * [cancellation tokens](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/context/CancellationToken.kt) and [deadlines](),
 * [try-finally](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/builder/TryFinally.kt)
 
-As always, AI is your friend here.
+As always, AI is your friend here. However, I've gotten mixed results when I ask it questions about structured cooperation directly, so I think a better approach is to
+ask questions such as "What files should I look at if I'm interested in understanding X."
 
 ### Where can I ask questions?
 Feel free to [create an issue](https://github.com/gabrielshanahan/scoop/issues/new) if you're unclear on something, and I'll do my best to explain. The same goes for any 

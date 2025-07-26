@@ -15,50 +15,6 @@ import org.codejargon.fluentjdbc.api.FluentJdbc
 import org.intellij.lang.annotations.Language
 import org.postgresql.util.PGobject
 
-/**
- * Handles all database operations for the `message_event` table, which tracks saga execution state.
- * 
- * The `message_event` table is the heart of structured cooperation's implementation. It tracks
- * the lifecycle of every saga execution, from initial message emission through completion or rollback.
- * This repository provides all the SQL operations needed to maintain this state.
- * 
- * ## Core Responsibilities
- * 
- * - **Event Recording**: Insert various types of message events (EMITTED, SEEN, SUSPENDED, etc.)
- * - **State Querying**: Find pending saga runs that are ready to be resumed  
- * - **Concurrency Control**: Use database locking to ensure safe concurrent saga execution
- * - **Rollback Coordination**: Handle complex rollback event insertion and tracking
- * 
- * ## Event Types
- * 
- * The repository handles these key event types:
- * - `EMITTED`: A message was sent (creates cooperation lineage)
- * - `SEEN`: A handler started processing a message (with cooperation lineage extension)
- * - `SUSPENDED`: A step completed and is waiting for child handlers
- * - `COMMITTED`: A saga completed successfully
- * - `ROLLING_BACK`: A saga entered rollback mode due to failure
- * - `ROLLBACK_EMITTED`: Rollback messages were sent to child handlers
- * - `ROLLED_BACK`: A saga completed its rollback successfully
- * - `ROLLBACK_FAILED`: A saga's rollback compensating action threw an exception
- * - `CANCELLATION_REQUESTED`: External cancellation was requested
- * 
- * ## Cooperation Lineage
- * 
- * The cooperation lineage (UUID array) is the key mechanism that enables structured cooperation.
- * It tracks parent-child relationships between saga executions:
- * - Parent messages have shorter lineages
- * - Child messages extend the parent's lineage with a new UUID
- * - This creates a tree structure that enables dependency tracking
- * 
- * ## Concurrency and Locking
- * 
- * The repository uses sophisticated PostgreSQL locking patterns to ensure safe concurrent
- * execution of multiple saga instances. See [startContinuationsForCoroutine] for details
- * on the locking strategy used to prevent race conditions.
- * 
- * For the theoretical foundation, see: https://developer.porn/posts/implementing-structured-cooperation/
- * For cooperation lineage details, see: https://developer.porn/posts/introducing-structured-cooperation/
- */
 @ApplicationScoped
 class MessageEventRepository(
     private val jsonbHelper: JsonbHelper,
@@ -148,6 +104,31 @@ class MessageEventRepository(
             .run()
     }
 
+    /**
+     * Records that a rollback request has been emitted for a specific cooperation lineage.
+     * 
+     * This method creates a `ROLLBACK_EMITTED` event to signal that a saga and all its children
+     * should enter rollback mode. This will get picked up by the logic in [startContinuationsForCoroutine],
+     * causing the rollback to start.
+     * 
+     * The method only emits rollback events when it's safe and sensible to do so - specifically, when there
+     * are no child handlers that are still actively running.
+     * 
+     * ## SQL Logic Breakdown
+     * 
+     * The complex WHERE clause implements a critical safety check:
+     * 1. **Find all descendant SEEN events**: Looks for child cooperation lineages using `<@` operator
+     * 2. **Check completion status**: Verifies each child has a corresponding COMMITTED or ROLLBACK_FAILED event
+     * 3. **Block rollback if active children exist**: Only proceeds if no children are still running
+     * 
+     * Note: We check for both COMMITTED and ROLLBACK_FAILED because if something rolled back successfully,
+     * then everything must've rolled back, and there's no point in emitting a rollback here. We only need
+     * to wait for children that are still actively executing to reach completion.
+     * 
+     * @param connection Database connection for the transaction
+     * @param cooperationLineage The cooperation lineage to initiate rollback for
+     * @param exception The failure that triggered the rollback request
+     */
     fun insertRollbackEmittedEvent(
         connection: Connection,
         cooperationLineage: List<UUID>,
@@ -160,6 +141,8 @@ class MessageEventRepository(
             .update(
                 """
                 WITH message_id_lookup AS (
+                    -- Find the message_id associated with this cooperation lineage
+                    -- Any event from the same lineage will have the same message_id
                     SELECT DISTINCT message_id 
                     FROM message_event 
                     WHERE cooperation_lineage = :cooperationLineage
@@ -175,16 +158,20 @@ class MessageEventRepository(
                     message_id_lookup.message_id, 'ROLLBACK_EMITTED', :cooperationLineage, :exception
                 FROM message_id_lookup
                 WHERE NOT EXISTS (
+                    -- Safety check: Only emit rollback if no actively running children exist
+                    -- Checking for COMMITTED and ROLLBACK_FAILED is enough because if something
+                    -- rolled back, then everything must've rolled back, and there's no point in
+                    -- emitting anything here
                     SELECT 1
                     FROM message_event seen
-                    LEFT JOIN message_event committed
-                      ON committed.cooperation_lineage = seen.cooperation_lineage
-                         AND committed.type = 'COMMITTED'
-                    WHERE seen.type = 'SEEN'
-                      AND seen.cooperation_lineage <@ :cooperationLineage
-                      AND committed.cooperation_lineage IS NULL
-                      AND cardinality(seen.cooperation_lineage) > 1
+                    LEFT JOIN message_event terminated
+                      ON terminated.cooperation_lineage = seen.cooperation_lineage
+                         AND terminated.type in ('COMMITTED', 'ROLLBACK_FAILED')
+                    WHERE seen.type = 'SEEN'                                    -- Child handler started
+                      AND seen.cooperation_lineage <@ :cooperationLineage       -- Is descendant of our lineage
+                      AND terminated.cooperation_lineage IS NULL                -- But hasn't successfully completed yet
                 )
+                -- Prevent duplicate rollback events for the same message
                 ON CONFLICT (message_id, type) WHERE type = 'ROLLBACK_EMITTED' DO NOTHING
             """
                     .trimIndent()
@@ -194,11 +181,40 @@ class MessageEventRepository(
             .run()
     }
 
+    /**
+     * Records a cancellation request for a specific cooperation lineage.
+     * 
+     * This method creates a `CANCELLATION_REQUESTED` event that signals a saga and its entire
+     * cooperation hierarchy should be cancelled. Cancellation requests are detected by
+     * [EventLoopStrategy] implementations and cause sagas to fail with a [CancellationRequestedException][io.github.gabrielshanahan.scoop.shared.coroutine.structuredcooperation.CancellationRequestedException].
+     * 
+     * ## Cancellation Implementation Overview
+     * 
+     * Cancellation in structured cooperation follows these key components:
+     * 
+     * ### Initiation
+     * - **[Capabilities.cancel]**: High-level API for initiating cancellation requests
+     * - **[CancellationRequestedException][io.github.gabrielshanahan.scoop.shared.coroutine.structuredcooperation.CancellationRequestedException]**: Exception type thrown when cancellation is detected
+     *
+     * ### Detection
+     * - **[cancellationRequested()][io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.cancellationRequested]** (strategyBuilders.kt): SQL generator for detecting cancellation events
+     * - **[EventLoopStrategy]**: Custom strategies can use `cancellationRequested()` in give-up conditions
+     *
+     * ### Execution
+     * - **[fetchGiveUpExceptions]**: Retrieves cancellation exceptions for throwing
+     * - **[CooperationScope.giveUpIfNecessary][io.github.gabrielshanahan.scoop.blocking.coroutine.CooperationScope.giveUpIfNecessary]**: Checks for and throws cancellation exceptions during saga execution
+     *
+     * @param connection Database connection for the transaction
+     * @param cooperationLineage The cooperation lineage to cancel
+     * @param exception The cancellation details (reason, source, etc.)
+     * 
+     * @see io.github.gabrielshanahan.scoop.shared.coroutine.structuredcooperation.CancellationRequestedException
+     * @see Capabilities.cancel
+     * @see fetchGiveUpExceptions
+     * @see io.github.gabrielshanahan.scoop.shared.coroutine.eventloop.strategy.cancellationRequested
+     */
     fun insertCancellationRequestedEvent(
         connection: Connection,
-        coroutineName: String?,
-        coroutineIdentifier: String?,
-        stepName: String?,
         cooperationLineage: List<UUID>,
         exception: CooperationFailure,
     ) {
@@ -217,25 +233,21 @@ class MessageEventRepository(
                 INSERT INTO message_event (
                     message_id, 
                     type, 
-                    coroutine_name, 
-                    coroutine_identifier, 
-                    step, 
+                    coroutine_name, coroutine_identifier, step, 
                     cooperation_lineage, 
                     exception
                 ) 
                 SELECT 
                     message_id_lookup.message_id,
                     'CANCELLATION_REQUESTED',
-                    :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :exception
+                    null, null, null, 
+                    :cooperationLineage, 
+                    :exception
                 FROM message_id_lookup
                 ON CONFLICT (cooperation_lineage, type) WHERE type = 'CANCELLATION_REQUESTED' DO NOTHING
-            """
-                    .trimIndent()
+            """.trimIndent()
             )
             .namedParam("cooperationLineage", lineageArray)
-            .namedParam("coroutineName", coroutineName)
-            .namedParam("coroutineIdentifier", coroutineIdentifier)
-            .namedParam("stepName", stepName)
             .namedParam("exception", jsonbHelper.toPGobject(exception))
             .run()
     }
@@ -277,6 +289,16 @@ class MessageEventRepository(
             .run()
     }
 
+    /**
+     * Records rollback requests for all messages emitted by a specific step.
+     * 
+     * This method creates `ROLLBACK_EMITTED` events for every message that was emitted during
+     * a specific step's execution. It's a key component of structured cooperation's rollback
+     * mechanism, ensuring that child handlers are instructed to roll back when their parent
+     * step needs to roll back.
+     * 
+     * This method is called during rollback continuation execution via [ScopeCapabilities.emitRollbacksForEmissions].
+     */
     fun insertRollbackEmittedEventsForStep(
         connection: Connection,
         stepName: String,
@@ -338,8 +360,7 @@ class MessageEventRepository(
                     SELECT * FROM message_event WHERE cooperation_lineage = :cooperationLineage AND type = 'SEEN'
                 )
                 ${giveUpSqlProvider("seen")}
-            """
-                    .trimIndent()
+                """.trimIndent()
             )
             .namedParam(
                 "cooperationLineage",
@@ -353,31 +374,59 @@ class MessageEventRepository(
             .filterNotNull()
 
     /**
-     * Starts new continuations for a given coroutine by creating SEEN and ROLLING_BACK events.
+     * Creates SEEN and ROLLING_BACK events for a given coroutine, thereby effectively starting
+     * new continuations.
      * 
      * This is the entry point for saga execution - it finds EMITTED events that don't have
      * corresponding SEEN events and creates them, extending the cooperation lineage. It also
      * handles ROLLBACK_EMITTED events that need corresponding ROLLING_BACK events.
      * 
-     * ## Concurrency Control
-     * 
-     * This method uses sophisticated PostgreSQL locking to ensure safe concurrent execution:
-     * - Uses FOR UPDATE SKIP LOCKED to prevent multiple instances from processing the same message
-     * - Validates that parent events are in the correct state before proceeding
-     * - Checks that the EventLoopStrategy's start conditions are met
+     * This method uses Postgres locking to ensure safe concurrent execution:
+     * - Uses FOR UPDATE SKIP LOCKED to prevent race conditions from happening when multiple instances
+     * of the saga are running
+     * - Validates that parent events are in the correct state before proceeding (also needed to
+     * prevent the race condition)
+     * - Checks that the EventLoopStrategy's [start][EventLoopStrategy.start] conditions are met
      * 
      * ## Race Condition Prevention
      * 
-     * The locking strategy prevents a critical race condition: if a parent coroutine is picked up
+     * The locking strategy prevents a tricky race condition: if a parent coroutine is picked up
      * due to a timeout condition becoming true, we need to guarantee that all child SEEN events
-     * have actually terminated. Without proper locking, a child could register a SEEN event at 
-     * the precise moment the parent starts cancellation, leading to inconsistent state.
-     * 
-     * ## Rollback Support
-     * 
-     * For rollbacks, we don't do the last_parent_event check to support partial rollbacks of
-     * only some subtree (as demonstrated in the "rolling back sub-hierarchy works" test).
-     * 
+     * have actually terminated to be able to do a proper rollback. Without locking, a child could
+     * register a SEEN event at the precise moment the parent starts cancellation, leading to a
+     * situation where part of the saga is still executing, while part is rolling back. Since a
+     * saga getting picked up also involves locking it for the entire run (see [finalSelect]),
+     * this guarantees that these two operations will always happen sequentially, and either:
+     *
+     * 1. A child SEEN is written first, in which case the parent saga won't get picked up for
+     * execution, since not all child SEEN's have finished (although, since deadlines are
+     * usually inherited, the child will likely immediately finish with a timeout failure), or
+     * 2. The saga is picked up first, in which case a ROLLING_BACK is emitted. Then, once we
+     * try to persist a child SEEN, we will fail the `last_parent_event` condition bellow,
+     * which checks that the parent is still waiting in the step in which the message was
+     * emitted.
+     *
+     * ## SQL Overview
+     *
+     * **SEEN Creation (Normal Execution)**:
+     * 1. Find EMITTED events without corresponding SEEN events
+     *    - `emitted_missing_seen` CTE: Identifies gaps where handlers need to start
+     * 2. Validate parent is SUSPENDED in the correct step and locks it
+     *    - `parent_seen_exists`: Finds parent SEEN record
+     *    - `parent_seen_lock_attempt`: Acquires lock on parent
+     *    - `last_parent_event`: Validates parent is SUSPENDED with matching step
+     * 3. Create SEEN events (extends cooperation lineage with new UUID)
+     *    - `seen_insert` CTE: Inserts validated SEEN events with extended lineage
+     *
+     * **ROLLING_BACK Creation (Rollback Execution)**:
+     * 1. Find ROLLBACK_EMITTED events without corresponding ROLLING_BACK events
+     *    - `rollback_emitted_missing_rolling_back` CTE: Identifies rollback requests needing handlers
+     * 2. Validate parent exists and lock it
+     *    - `parent_seen_exists`: Finds parent SEEN record
+     *    - `parent_seen_lock_attempt`: Acquires lock on parent
+     * 3. Create ROLLING_BACK events (preserves existing cooperation lineage)
+     *    - `rolling_back_insert` CTE: Inserts validated ROLLING_BACK events with original lineage
+     *
      * @param connection Database connection for the transaction
      * @param coroutineName Name of the coroutine to start continuations for
      * @param coroutineIdentifier Unique identifier for coroutine instances
@@ -391,19 +440,6 @@ class MessageEventRepository(
         topic: String,
         eventLoopStrategy: EventLoopStrategy,
     ) {
-        // The lock gymnastics are necessary in combination with the strategy evaluation in
-        // PendingCoroutineRunSql - specifically, we need to guarantee that the "All seens have
-        // been terminated" holds when a parent coroutine is picked up due to a giving up condition
-        // becoming true. The quintessential place where this is necessary is a network partition,
-        // where a certain coroutine expected by the strategy is unavailable for the entire time 
-        // until a timeout happens (in which case we correctly don't want to block the revert),
-        // but then, at the precise moment we pick up the parent to start the cancellation, it
-        // appears, registers a SEEN, and starts executing.
-
-        // We don't do the last_parent_event check for rollbacks to support partial rollbacks of 
-        // only some subtree, as in test `rolling back sub-hierarchy works`
-
-        // TODO: Move this to some repository
         @Language("PostgreSQL")
         val sql =
             """
@@ -450,6 +486,7 @@ class MessageEventRepository(
                                 AND last_parent_event.step = emitted.step
                             )
                         )
+                        -- EventLoopStrategy says we're good to go
                         AND (${eventLoopStrategy.start("emitted")})
                 ),
                 -- Find ROLLBACK_EMITTED records missing a ROLLING_BACK
@@ -480,7 +517,9 @@ class MessageEventRepository(
                         AND (
                                 -- Either no SEEN record exists (i.e., this is a toplevel emission, and there's nothing to lock)
                                 parent_seen_exists.id IS NULL
-                                -- OR the SEEN record exists AND we successfully locked it AND the parent sequence's last event is SUSPENDED with matching step
+                                -- OR the SEEN record exists AND we successfully locked it
+                                -- we don't do require that last_parent_event be a SUSPENDED, like we do when dealing with SEEN above,
+                                -- because we want to allow partial rollbacks of subtrees (even though it's dangerous) 
                                 OR (
                                     parent_seen_exists.id IS NOT NULL 
                                     AND parent_seen_lock_attempt.locked IS NOT NULL
@@ -544,9 +583,9 @@ class MessageEventRepository(
     /**
      * Represents a saga execution that is ready to be resumed.
      * 
-     * This data class contains all the information needed to build a [Continuation] and
-     * resume saga execution from where it left off. It's the result of the complex SQL
-     * queries in [PendingCoroutineRunSql] that determine which sagas are ready to proceed.
+     * This data class contains all the information needed to build a
+     * [Continuation][io.github.gabrielshanahan.scoop.blocking.coroutine.continuation.Continuation]
+     * and resume saga execution from where it left off.
      * 
      * @param messageId The ID of the message being processed
      * @param topic The message topic
@@ -554,8 +593,8 @@ class MessageEventRepository(
      * @param payload The message payload
      * @param createdAt When the message was originally created
      * @param step The last step that was suspended (null if not suspended yet)
-     * @param latestScopeContext The latest scope-level context (shared across cooperation lineage)
-     * @param latestContext The latest step-level context (local to this saga)
+     * @param latestScopeContext Under certain conditions, the context from the second-to-last persisted message event. See doc comment of [finalSelect] for an explanation.
+     * @param latestContext The context from the last persisted message event
      * @param childRolledBackExceptions JSON array of exceptions from child handlers that rolled back successfully
      * @param childRollbackFailedExceptions JSON array of exceptions from child rollbacks that failed
      * @param rollingBackException The exception that caused this saga to enter rollback mode (if any)
@@ -577,28 +616,9 @@ class MessageEventRepository(
     /**
      * Finds and locks a saga execution that is ready to be resumed.
      * 
-     * This method implements the core structured cooperation logic by querying for sagas
-     * that are ready to proceed based on the [EventLoopStrategy]. It uses the complex
-     * SQL queries defined in [PendingCoroutineRunSql] to determine readiness.
-     * 
-     * ## Double-Checked Locking Pattern
-     * 
-     * This method implements a variant of double-checked locking to prevent race conditions:
-     * 1. First query: Find a saga that appears ready and get its ID
-     * 2. Lock the saga: Use FOR UPDATE SKIP LOCKED to acquire an exclusive lock
-     * 3. Second query: Re-evaluate readiness with the lock held
-     * 
-     * This pattern is necessary because PostgreSQL's FOR UPDATE SKIP LOCKED uses the state
-     * of locks at execution time, not at the beginning of the transaction. Without the
-     * double-check, we could pick up a saga with stale data if another handler committed
-     * changes between our readiness evaluation and lock acquisition.
-     * 
-     * ## Structured Cooperation Logic
-     * 
-     * The readiness determination follows structured cooperation rules:
-     * - For happy path: All child handlers must have completed (COMMITTED/ROLLED_BACK/ROLLBACK_FAILED)
-     * - For rollback path: All child rollbacks must have completed
-     * - EventLoopStrategy can override these rules (e.g., for timeouts, cancellation)
+     * This method uses the SQL query defined in [finalSelect] to determine readiness,
+     * and implements the equivalent of double-checked locking to guard against a tricky
+     * race condition (see bellow).
      * 
      * @param connection Database connection for the transaction
      * @param coroutineName Name of the coroutine to fetch pending runs for
@@ -629,8 +649,8 @@ class MessageEventRepository(
             //    1. Evaluate which SEEN records are waiting to be processed
             //    2. Pick one and lock it, skipping locked ones.
             //
-            // An important refresher: FOR UPDATE SKIP LOCKED uses the state of locks
-            // at the time it's executed, not at the beginning of the transaction.
+            // An important refresher: FOR UPDATE SKIP LOCKED references the state of
+            // locks at the time it's executed, not at the beginning of the transaction.
             //
             // A race condition can arise in the following way:
             //
@@ -640,13 +660,12 @@ class MessageEventRepository(
             // prevent us from picking it up, the handler commits and releases the lock.
             // This causes us to pick up the SEEN, but still retain and use the old data
             // we fetched earlier, resulting in us re-running the same step again.
-            // Therefore,
-            // we mitigate this by rerunning the selection process once we have acquired the
-            // lock.
+            // Therefore, we need to mitigate this by rerunning the selection process once
+            // we have acquired the lock.
             //
             // Postgres attempts to mitigate this to a certain extent by checking that the
             // row being locked has not been modified during the time the query is run and
-            // refetches the record if that happens. Some solutions to this problem revolve
+            // refetching the record if that happens. Some solutions to this problem revolve
             // around this, recommending you always modify the row being locked. However,
             // Postgres only refetches that specific row and doesn't evaluate the rest of
             // the conditions. This makes it unusable for our purposes, since, e.g., the
@@ -674,7 +693,7 @@ class MessageEventRepository(
                                 .toLocalDateTime()
                                 .atOffset(ZoneOffset.UTC),
                         cooperationLineage =
-                            (it.getArray("cooperation_lineage").array as Array<UUID>).toList(),
+                            @Suppress("UNCHECKED_CAST") (it.getArray("cooperation_lineage").array as Array<UUID>).toList(),
                         step = it.getString("step"),
                         latestScopeContext = it.getObject("latest_scope_context") as PGobject?,
                         latestContext = it.getObject("latest_context") as PGobject?,

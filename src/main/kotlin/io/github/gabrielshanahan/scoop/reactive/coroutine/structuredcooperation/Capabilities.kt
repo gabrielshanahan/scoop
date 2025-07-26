@@ -141,9 +141,6 @@ private class Capabilities(
 
         return messageEventRepository.insertCancellationRequestedEvent(
             connection,
-            null,
-            null,
-            null,
             cooperationScopeIdentifier.cooperationLineage,
             cooperationFailure,
         )

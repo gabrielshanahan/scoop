@@ -2,13 +2,67 @@ package io.github.gabrielshanahan.scoop.shared.coroutine.context
 
 import com.fasterxml.jackson.databind.ObjectMapper
 
+/**
+ * CooperationContextMap - The primary implementation of lazy deserialization for [CooperationContext]
+ * 
+ * This is the core implementation that enables the distributed cooperation context system to work
+ * efficiently across heterogeneous services. It maintains context elements in two forms:
+ * - **Serialized form**: JSON strings that can flow between any services
+ * - **Deserialized form**: Typed Kotlin objects that are only created when accessed
+ * 
+ * ## Two-Map Architecture
+ * 
+ * The implementation uses two internal maps to achieve lazy deserialization:
+ * - **[serializedMap]**: All context data as JSON strings (key name → JSON string)
+ * - **[deserializedMap]**: Cached deserialized objects (Key → Element)
+ * 
+ * This dual representation allows:
+ * - **Performance**: Only deserialize data when it's actually accessed
+ * - **Interoperability**: Pass through unknown context from other services unchanged
+ * - **Type safety**: Provide typed access to known context elements
+ * 
+ * ## Lazy Deserialization Flow
+ * 
+ * 1. **Initial state**: All context starts in [serializedMap] as JSON strings
+ * 2. **First access**: [get] method checks [deserializedMap] first (cache hit)
+ * 3. **Cache miss**: Looks up JSON in [serializedMap] and deserializes based on key type:
+ *    - [MappedKey]: Uses Jackson to deserialize to typed object
+ *    - [UnmappedKey]: Wraps JSON string in [OpaqueElement]
+ * 4. **Caching**: Stores deserialized result in [deserializedMap] for future access
+ * 
+ * ## Custom Element Combining
+ * 
+ * When contexts are combined with [plus], this implementation enables custom combining logic
+ * by calling `element1.plus(element2)` when both contexts contain the same key. This allows
+ * elements like
+ * [TryFinallyElement][io.github.gabrielshanahan.scoop.blocking.coroutine.builder.TryFinallyElement]
+ * and [CancellationToken] to implement custom merging behaviors rather than just simple replacement.
+ * 
+ * @param serializedMap JSON strings keyed by element name (from [CooperationContextJacksonCustomizer])
+ * @param deserializedMap Cached deserialized elements keyed by their [CooperationContext.Key]
+ * @param objectMapper Jackson mapper for deserializing [MappedKey] elements (null in pure creation scenarios)
+ */
 data class CooperationContextMap(
     private val serializedMap: MutableMap<String, String>,
     private val deserializedMap: MutableMap<CooperationContext.Key<*>, CooperationContext.Element>,
     private val objectMapper: ObjectMapper? = null,
 ) : CooperationContext {
 
-    // TODO: Doc that only deserialize when needed, so small cost unless you actually use it
+    /**
+     * Retrieves a context element by key, deserializing lazily on first access.
+     * 
+     * This method implements the core lazy deserialization strategy:
+     * 1. Check [deserializedMap] first (cache hit - return immediately)
+     * 2. If not cached and no [objectMapper], return null or cached value
+     * 3. Look up JSON string in [serializedMap]
+     * 4. Deserialize based on key type:
+     *    - [MappedKey]: Use Jackson to deserialize to typed object
+     *    - [UnmappedKey]: Wrap JSON in [OpaqueElement]
+     * 5. Cache result in [deserializedMap] and return
+     * 
+     * **Performance**: Only deserializes when needed, so minimal cost unless actually accessed.
+     * This enables passing large contexts through services that don't use them.
+     */
     @Suppress("UNCHECKED_CAST")
     override fun <E : CooperationContext.Element> get(key: CooperationContext.Key<E>): E? {
         if (deserializedMap[key] != null || objectMapper == null) {
@@ -26,13 +80,26 @@ data class CooperationContextMap(
         return (deserializedElement as E?)?.also { deserializedMap[key] = it }
     }
 
-    // TODO: Doc that this implementation will not run custom plus logic if the key hasn't been
-    // touched in either of the maps!
-    //  in practice, that shouldn't matter, because if we create the map ourselves, all the keys are
-    // touched, and the only way
-    //  we can get an untouched key is by deserializing the one in a message, so in practice we
-    // could only add that map to itself,
-    //  and that has no effect
+    /**
+     * Combines this context with another, enabling custom element combining logic like
+     * [TryFinallyElement][io.github.gabrielshanahan.scoop.blocking.coroutine.builder.TryFinallyElement]
+     * list merging and [CancellationToken] logical AND.
+     * 
+     * **Combining Strategy**:
+     * - **Single element**: If key exists, calls `existingElement.plus(newElement)`
+     * - **Two CooperationContextMaps**: Forces deserialization of all keys in both maps,
+     *   then applies element-level combining for conflicts
+     * - **Other contexts**: Falls back to fold-based combining
+     * 
+     * **Important limitation**: Custom plus logic only runs for keys that have been "touched"
+     * (accessed) in either map. In practice this doesn't matter because:
+     * - When we create maps ourselves, all keys are touched
+     * - Untouched keys only exist when deserializing from messages
+     * - Adding a map to itself has no effect anyway
+     * 
+     * **Performance consideration**: Combining two [CooperationContextMap]s forces
+     * deserialization of all elements to enable proper custom combining.
+     */
     override fun plus(context: CooperationContext): CooperationContext =
         when (context) {
             is CooperationContext.Element ->
@@ -53,8 +120,7 @@ data class CooperationContextMap(
                 val deserializedKeys = deserializedMap.keys + context.deserializedMap.keys
 
                 // Make sure all keys deserialized in one map are also deserialized in the other
-                // map,
-                // so we can run instance-specific logic when calling
+                // map, so we can run instance-specific logic when calling
                 // CooperationContext.Element.plus
                 deserializedKeys.forEach { key ->
                     get(key)
@@ -78,6 +144,12 @@ data class CooperationContextMap(
             else -> context.fold(this, CooperationContext::plus)
         }
 
+    /**
+     * Creates a new context with the specified key removed from both maps.
+     * 
+     * This removes the element from both the serialized and deserialized representations
+     * to maintain consistency between the two maps.
+     */
     override fun minus(key: CooperationContext.Key<*>): CooperationContext =
         if (!has(key)) {
             this
@@ -89,15 +161,25 @@ data class CooperationContextMap(
             )
         }
 
+    /**
+     * Folds over all context elements, presenting a unified view of both maps.
+     * 
+     * This method creates a logical union of both maps:
+     * - Elements in [serializedMap] are presented as [OpaqueElement]s
+     * - Elements in [deserializedMap] are presented as their typed objects
+     * - Duplicates are handled by preferring deserialized elements
+     * 
+     * Results are sorted by key name for deterministic iteration order.
+     */
     override fun <R> fold(initial: R, operation: (R, CooperationContext.Element) -> R): R =
         buildSet {
-                serializedMap.forEach { (key, value) ->
-                    add(
-                        CooperationContext.OpaqueElement(CooperationContext.UnmappedKey(key), value)
-                    )
-                }
-                addAll(deserializedMap.values)
+            serializedMap.forEach { (key, value) ->
+                add(
+                    CooperationContext.OpaqueElement(CooperationContext.UnmappedKey(key), value)
+                )
             }
-            .toSortedSet(compareBy { it.key.serializedValue })
-            .fold(initial, operation)
+            addAll(deserializedMap.values)
+        }
+        .toSortedSet(compareBy { it.key.serializedValue })
+        .fold(initial, operation)
 }
