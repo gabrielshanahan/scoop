@@ -1,5 +1,5 @@
 plugins {
-    java
+    `java-library`
     id("org.jetbrains.kotlin.jvm")
     id("org.jetbrains.kotlin.plugin.allopen")
     id("io.quarkus")
@@ -26,12 +26,11 @@ dependencies {
     implementation("io.quarkus:quarkus-flyway")
     implementation("io.quarkus:quarkus-rest-jackson")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-    implementation("io.quarkus:quarkus-jdbc-postgresql")
-    implementation("io.quarkiverse.fluentjdbc:quarkus-fluentjdbc:1.0.0")
+    api("io.quarkus:quarkus-jdbc-postgresql")
+    api("io.quarkiverse.fluentjdbc:quarkus-fluentjdbc:1.0.0")
     implementation("io.quarkus:quarkus-reactive-pg-client")
     implementation("io.quarkus:quarkus-arc")
     implementation("io.quarkus:quarkus-kotlin")
-    implementation("org.jetbrains.kotlin:kotlin-stdlib")
     implementation("com.github.f4b6a3:uuid-creator:6.1.0")
     testImplementation("io.quarkus:quarkus-junit5")
     testImplementation("io.rest-assured:rest-assured")
@@ -76,7 +75,12 @@ detekt {
     baseline = file("$projectDir/config/detekt/baseline.xml")
 }
 
+tasks.withType<io.gitlab.arturbosch.detekt.DetektCreateBaselineTask>().configureEach {
+    jvmTarget = "21"
+}
+
 tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    jvmTarget = "21"
     reports {
         html.required.set(true)
         xml.required.set(false)
