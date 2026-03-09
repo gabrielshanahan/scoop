@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.jvm")
     id("org.jetbrains.kotlin.plugin.allopen")
     id("io.quarkus")
-    id("com.ncorti.ktfmt.gradle") version "0.22.0"
+    id("com.ncorti.ktfmt.gradle") version "0.25.0"
     id("io.gitlab.arturbosch.detekt") version "1.23.8"
 }
 
@@ -31,7 +31,7 @@ dependencies {
     implementation("io.quarkus:quarkus-reactive-pg-client")
     implementation("io.quarkus:quarkus-arc")
     implementation("io.quarkus:quarkus-kotlin")
-    implementation("com.github.f4b6a3:uuid-creator:6.1.0")
+    implementation("com.github.f4b6a3:uuid-creator:6.1.1")
     testImplementation("io.quarkus:quarkus-junit5")
     testImplementation("io.rest-assured:rest-assured")
 }

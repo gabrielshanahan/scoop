@@ -84,7 +84,7 @@ class MessageEventRepository(
                 """
                 INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, context) 
                 VALUES (:messageId, 'EMITTED', :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :context)
-            """
+                """
                     .trimIndent()
             )
             .namedParam("messageId", messageId)
@@ -182,7 +182,7 @@ class MessageEventRepository(
                 )
                 -- Prevent duplicate rollback events for the same message
                 ON CONFLICT (message_id, type) WHERE type = 'ROLLBACK_EMITTED' DO NOTHING
-            """
+                """
                     .trimIndent()
             )
             .namedParam("cooperationLineage", lineageArray)
@@ -259,7 +259,7 @@ class MessageEventRepository(
                     :exception
                 FROM message_id_lookup
                 ON CONFLICT (cooperation_lineage, type) WHERE type = 'CANCELLATION_REQUESTED' DO NOTHING
-            """
+                """
                     .trimIndent()
             )
             .namedParam("cooperationLineage", lineageArray)
@@ -284,7 +284,7 @@ class MessageEventRepository(
                 """
                 INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, exception, context) 
                 VALUES (:messageId, :messageEventType::message_event_type, :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :exception, :context)
-            """
+                """
                     .trimIndent()
             )
             .namedParam("messageId", messageId)
@@ -347,7 +347,7 @@ class MessageEventRepository(
                     message_id, 'ROLLBACK_EMITTED', 
                     :cooperationLineage, :coroutineName, :coroutineIdentifier, :scopeStepName, :exception, :context
                 FROM emitted_record
-            """
+                """
                     .trimIndent()
             )
             .namedParam("stepName", stepName)

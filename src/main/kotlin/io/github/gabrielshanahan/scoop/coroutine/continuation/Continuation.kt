@@ -149,8 +149,7 @@ interface Continuation {
          * spawned by emitting messages failed. The step itself did not fail - if it had, the
          * transaction would never have committed and there would be nothing to roll back.
          */
-        data class Failure(override val message: Message, val throwable: Throwable) :
-            LastStepResult
+        data class Failure(override val message: Message, val throwable: Throwable) : LastStepResult
     }
 
     /**

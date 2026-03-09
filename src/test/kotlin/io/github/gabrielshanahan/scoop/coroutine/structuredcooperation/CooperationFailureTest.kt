@@ -106,12 +106,12 @@ private const val EXCEPTION_JSON =
         "functionName" : "invoke"
       }, {
         "fileName" : "QuarkusTestExtension.java",
-        "lineNumber" : 960,
+        "lineNumber" : 1000,
         "className" : "io.quarkus.test.junit.QuarkusTestExtension",
         "functionName" : "runExtensionMethod"
       }, {
         "fileName" : "QuarkusTestExtension.java",
-        "lineNumber" : 810,
+        "lineNumber" : 848,
         "className" : "io.quarkus.test.junit.QuarkusTestExtension",
         "functionName" : "interceptTestMethod"
       } ],
@@ -136,12 +136,12 @@ private const val EXCEPTION_JSON =
           "functionName" : "invoke"
         }, {
           "fileName" : "QuarkusTestExtension.java",
-          "lineNumber" : 960,
+          "lineNumber" : 1000,
           "className" : "io.quarkus.test.junit.QuarkusTestExtension",
           "functionName" : "runExtensionMethod"
         }, {
           "fileName" : "QuarkusTestExtension.java",
-          "lineNumber" : 810,
+          "lineNumber" : 848,
           "className" : "io.quarkus.test.junit.QuarkusTestExtension",
           "functionName" : "interceptTestMethod"
         } ],
