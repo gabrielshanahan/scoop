@@ -15,6 +15,9 @@ I do recommend you [read the articles](#how-does-it-solve-the-problem) first.
 
 ## Table of Contents
 
+- [Getting Started](#getting-started)
+  - [Plain Kotlin / JVM](#plain-kotlin--jvm)
+  - [Quarkus Integration](#quarkus-integration)
 - [Introduction](#introduction)
   - [What is this?](#what-is-this)
   - [What problem does it solve?](#what-problem-does-it-solve)
@@ -23,10 +26,79 @@ I do recommend you [read the articles](#how-does-it-solve-the-problem) first.
   - [How do I grok it?](#how-do-i-grok-it)
   - [Where can I ask questions?](#where-can-i-ask-questions)
 - [Overview](#overview)
+  - [Project Structure](#project-structure)
   - [The state of Scoop](#the-state-of-scoop)
   - [Data model](#data-model)
   - [Important components and high-level flow](#important-components-and-high-level-flow)
 - [Glossary of terms](#glossary-of-terms)
+
+## Getting Started
+
+Scoop is published as two Maven artifacts:
+
+- **`scoop-core`** — Framework-agnostic library containing all structured cooperation logic. Depends only on PostgreSQL JDBC, Jackson, FluentJDBC, and SLF4J.
+- **`scoop-quarkus`** — Quarkus integration module providing CDI producers, Flyway migrations, and LISTEN/NOTIFY support via Vert.x.
+
+### Plain Kotlin / JVM
+
+Add the core dependency:
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("io.github.gabrielshanahan:scoop-core:0.1.0")
+}
+```
+
+Wire everything up using the `Scoop` factory:
+
+```kotlin
+import io.github.gabrielshanahan.scoop.Scoop
+
+val dataSource: DataSource = // your PostgreSQL DataSource
+val scoop = Scoop.create(dataSource)
+
+// Subscribe handlers and launch messages via scoop.messageQueue
+// ...
+
+scoop.close()
+```
+
+By default, Scoop uses polling to detect new messages. For lower-latency LISTEN/NOTIFY support, provide a `TopicNotifier` implementation:
+
+```kotlin
+val scoop = Scoop.create(
+    dataSource = dataSource,
+    topicNotifier = myTopicNotifier, // implements TopicNotifier
+)
+```
+
+**Database migrations:** The SQL migrations for creating the required `message` and `message_event` tables are included in the JAR at `db/scoop/migration/`. You can apply them using Flyway, or run them manually against your PostgreSQL database.
+
+### Quarkus Integration
+
+Add the Quarkus module (it transitively includes `scoop-core`):
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("io.github.gabrielshanahan:scoop-quarkus:0.1.0")
+}
+```
+
+The Quarkus module automatically:
+- Produces all Scoop beans via CDI (`PostgresMessageQueue`, `EventLoop`, etc.)
+- Runs Flyway migrations on startup
+- Provides LISTEN/NOTIFY support via Vert.x `PgSubscriber`
+
+Just inject `PostgresMessageQueue` and start subscribing handlers:
+
+```kotlin
+@ApplicationScoped
+class MyService(private val messageQueue: PostgresMessageQueue) {
+    // ...
+}
+```
 
 ## Introduction
 
@@ -93,15 +165,15 @@ Before browsing this repository, you should read the articles that introduce str
 ### How do I run it?
 Currently, the only way to interact with the code is via tests, but you're free to play around with things and expose the functionality however you want.
 
-To run the tests, make sure you have Docker installed (Quarkus uses [Testcontainers](https://testcontainers.com/)), then clone the repo and either run 
-`./gradlew clean test`, or run the tests from your IDE.
+To run the tests, make sure you have Docker installed (Quarkus uses [Testcontainers](https://testcontainers.com/)), then clone the repo and either run
+`./gradlew :scoop-quarkus:test`, or run the tests from your IDE.
 
 Note that some tests may be flakey, because almost all of them involve some sort of sleeping to let the handlers finish their work. If that happens,
 increase the corresponding `Thread.sleep()` in the failing test.
 
 ### How do I grok it?
 For the amount of punching power it packs, Scoop is actually relatively small and can probably be understood in an afternoon. Even though it uses
-Quarkus and Kotlin, it does not use any terribly advanced features, and you should be able to make sense of the code without being versed in them. The only
+Kotlin, it does not use any terribly advanced features, and you should be able to make sense of the code without being versed in them. The only
 real prerequisite is SQL, which is used quite heavily.
 
 The following is just my recommendation and might or might not work for you. Stick to it if it does, ignore it if it doesn't—you do you. In any case,
@@ -109,56 +181,83 @@ don't be discouraged by fancy names like "coroutine" and "continuation"; the cod
 those mean (feel free to take a peek at the [glossary](#glossary-of-terms) below if you're interested).
 
 Start by reading the first two articles above. Then, read about [the important components](#important-components-and-high-level-flow) below and gain a high-level
-understanding of how Scoop is structured. 
+understanding of how Scoop is structured.
 
 Then, pretty much follow the diagram in that section. First, learn about how you interact with the library:
-* How sagas are built and represented in the code ([SagaBuilder](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/SagaBuilder.kt), 
-[DistributedCoroutine](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/DistributedCoroutine.kt)). Don't worry about [EventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/EventLoopStrategy.kt)
+* How sagas are built and represented in the code ([SagaBuilder](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/SagaBuilder.kt),
+[DistributedCoroutine](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/DistributedCoroutine.kt)). Don't worry about [EventLoopStrategy](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/EventLoopStrategy.kt)
   at this stage.
-* How they are subscribed to topics and how messages are emitted ([PostgresMessageQueue](src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/PostgresMessageQueue.kt)). Don't worry about [HandlerRegistry](src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/HandlerRegistry.kt)
+* How they are subscribed to topics and how messages are emitted ([PostgresMessageQueue](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/PostgresMessageQueue.kt)). Don't worry about [HandlerRegistry](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/HandlerRegistry.kt)
   at this stage).
 
 Next, follow the execution flow when a saga is picked up for handling (basically, what is depicted on the diagram below). Go as deep as you need to, but only as
 far as you encounter any SQL—just trust it for now.
-* Start in [EventLoop](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/EventLoop.kt), and understand the two steps a `tick` is made of (i.e., starting continuations and resuming coroutines).
+* Start in [EventLoop](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/EventLoop.kt), and understand the two steps a `tick` is made of (i.e., starting continuations and resuming coroutines).
 * Next, focus on how coroutines are resumed:
   * What state is fetched (not how—trust the SQL for now),
-  * What a [Continuation](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/continuation/Continuation.kt) is (leave `resumeWith` for the next step, 
-    and also ignore the fact that it coincides with the [CooperationScope](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/CooperationScope.kt), you'll come back to `CooperationScope` later), its
-    [happy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/continuation/HappyPathContinuation.kt) and
-    [rollback](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/continuation/RollbackPathContinuation.kt) flavors, 
+  * What a [Continuation](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/continuation/Continuation.kt) is (leave `resumeWith` for the next step,
+    and also ignore the fact that it coincides with the [CooperationScope](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/CooperationScope.kt), you'll come back to `CooperationScope` later), its
+    [happy](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/continuation/HappyPathContinuation.kt) and
+    [rollback](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/continuation/RollbackPathContinuation.kt) flavors,
     and how it's built from the `CoroutineState`
   * How `resumeWith` works
 * Finally, understand what happens based on the result of `resumeWith`
 
-At this point, go back and take a separate look at [CooperationScope](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/CooperationScope.kt), 
+At this point, go back and take a separate look at [CooperationScope](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/CooperationScope.kt),
 what capabilities it provides, and why it so happens that the `Continuation` instance can coincide with the `CooperationScope` instance.
 
 Then, take a look at the SQL and `EventLoopStrategy`:
-* The "start continuations" SQL in [MessageEventRepository](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/structuredcooperation/MessageEventRepository.kt),
-* The "pending coroutine run" SQL in [PendingCoroutineRunSql](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/structuredcooperation/PendingCoroutineRunSql.kt), and how
-  it's influenced by [EventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/EventLoopStrategy.kt),
-* How `EventLoopStrategy` is implemented ([StandardEventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/StandardEventLoopStrategy.kt), ignore
-  [SleepEventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/Sleep.kt) for now) and how [HandlerRegistry](src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/HandlerRegistry.kt)
+* The "start continuations" SQL in [MessageEventRepository](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/structuredcooperation/MessageEventRepository.kt),
+* The "pending coroutine run" SQL in [PendingCoroutineRunSql](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/structuredcooperation/PendingCoroutineRunSql.kt), and how
+  it's influenced by [EventLoopStrategy](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/EventLoopStrategy.kt),
+* How `EventLoopStrategy` is implemented ([StandardEventLoopStrategy](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/StandardEventLoopStrategy.kt), ignore
+  [SleepEventLoopStrategy](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/Sleep.kt) for now) and how [HandlerRegistry](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/HandlerRegistry.kt)
   provides a placeholder solution of the ["who is listening" problem](https://developer.porn/posts/implementing-structured-cooperation/#building-and-maintaining-a-handler-topology) in Scoop.
 
 Finally, learn about individual functionalities:
-* cancellation requests (search for `CANCELLATION_REQUESTED`. Don't confuse this with [cancellation tokens](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CancellationToken.kt) bellow),
-* [cooperation context](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CooperationContext.kt),
-* [sleeping and scheduled steps](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/Sleep.kt)
-* [cancellation tokens](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CancellationToken.kt) and [deadlines](),
-* [try-finally](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/TryFinally.kt)
+* cancellation requests (search for `CANCELLATION_REQUESTED`. Don't confuse this with [cancellation tokens](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CancellationToken.kt) bellow),
+* [cooperation context](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CooperationContext.kt),
+* [sleeping and scheduled steps](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/Sleep.kt)
+* [cancellation tokens](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CancellationToken.kt) and [deadlines](),
+* [try-finally](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/TryFinally.kt)
 
 As always, AI is your friend here. However, I've gotten mixed results when I ask it questions about structured cooperation directly, so I think a better approach is to
 ask questions such as "What files should I look at if I'm interested in understanding X."
 
 ### Where can I ask questions?
-Feel free to [create an issue](https://github.com/gabrielshanahan/scoop/issues/new) if you're unclear on something, and I'll do my best to explain. The same goes for any 
+Feel free to [create an issue](https://github.com/gabrielshanahan/scoop/issues/new) if you're unclear on something, and I'll do my best to explain. The same goes for any
 topics you think should be discussed. Anything from "How would one do X using structured cooperation?" and "Wouldn't X be a better approach to solve Y?" to "I see problem X
 in the way things are implemented" and "We should implement this in X next," and any other thoughts you might have, are welcomed. Ideally also search through issues to
-see if something similar wasn't discussed elsewhere. 
+see if something similar wasn't discussed elsewhere.
 
 ## Overview
+
+### Project Structure
+
+Scoop is organized as a multi-module Gradle project:
+
+```
+scoop/
+├── scoop-core/          # Framework-agnostic library (published to Maven Central)
+│   └── src/main/kotlin/ # All core structured cooperation logic
+├── scoop-quarkus/       # Quarkus integration module (published to Maven Central)
+│   ├── src/main/kotlin/ # CDI producers, PgSubscriber notifier, Jackson customizer
+│   └── src/test/kotlin/ # Integration tests (require PostgreSQL via Testcontainers)
+├── build.gradle.kts     # Shared build config, publishing, code quality
+└── settings.gradle.kts
+```
+
+**`scoop-core`** has no framework dependencies. It depends only on:
+- PostgreSQL JDBC driver
+- Jackson (for JSON serialization of cooperation context)
+- FluentJDBC (lightweight JDBC wrapper)
+- SLF4J (logging facade)
+
+**`scoop-quarkus`** depends on `scoop-core` and adds:
+- CDI bean producers for all Scoop components
+- Vert.x `PgSubscriber`-based LISTEN/NOTIFY support
+- Flyway migrations (auto-discovered on startup)
+- Jackson `ObjectMapperCustomizer` for cooperation context serialization
 
 ### The state of Scoop
 Scoop is currently a proof-of-concept implementation. That means that its design is "best effort"—it's not guaranteed to be bug-free, the architecture isn't
@@ -242,7 +341,7 @@ flowchart TD
     subgraph User Interaction
         SB[SagaBuilder] --> DC[DistributedCoroutine] -->|subscribes handler| MQ
     end
-    
+
     PG[(Postgres)] -->|Postgres NOTIFY| TK
     subgraph EventLoop
         CLOCK[⏱️] --> TK[Tick]
@@ -288,9 +387,9 @@ new messages being published to the topic, two, a periodic process is started th
 
 In the simplest case, a coroutine can be resumed if the structured cooperation rule mentioned above holds, i.e., all handlers of all messages emitted in the previous step
 (if any) have finished. Things get a little more complicated when you add errors, cancellations, and timeouts to the mix, but essentially this is still what happens. All this
-is done by [a moderately large piece of SQL](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/structuredcooperation/PendingCoroutineRunSql.kt), into which the
-outputs of [`EventLoopStrategy`](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/EventLoopStrategy.kt) are spliced. The purpose of
-`EventLoopStrategy` is explained in the articles above. 
+is done by [a moderately large piece of SQL](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/structuredcooperation/PendingCoroutineRunSql.kt), into which the
+outputs of [`EventLoopStrategy`](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/EventLoopStrategy.kt) are spliced. The purpose of
+`EventLoopStrategy` is explained in the articles above.
 
 When a coroutine is ready to be resumed, its state (e.g., what step was last executed, if it resulted in a failure or not, if any messages emitted in the last step
 resulted in failures or not, if a rollback is in progress or not, etc.) is pulled from the database, and combined with the list of steps in the coroutine definition
@@ -304,13 +403,12 @@ executing, the same process repeats until all steps have been executed.
 The component responsible for doing this process (fetching the state of a coroutine, building continuations, running them, updating the state) is called an `EventLoop`,
 and the name of this process is a `tick` - i.e., a `tick` is doing all that, for a single coroutine.
 
-Here's a simplified version of the above, which is pretty much what you will find in the actual code (see 
-[EventLoop](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/EventLoop.kt))
+Here's a simplified version of the above, which is pretty much what you will find in the actual code (see
+[EventLoop](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/EventLoop.kt))
 
 ```kotlin
 class EventLoop {
-    
-    @Transactional
+
     fun tick(distributedCoroutine: DistributedCoroutine) {
         val state = fetchSomePendingCoroutineState()
         val continuation = distributedCoroutine.buildContinuation(state)
@@ -329,7 +427,7 @@ class EventLoop {
 
 ### Glossary of terms
 The explanations below involve some hand waving on my side and are far from precise. The point is to gain a semi-intuitive understanding so you can make sense of Scoop, not
-to save you from studying CS. I encourage you to invest the time to understand all these terms more thoroughly. 
+to save you from studying CS. I encourage you to invest the time to understand all these terms more thoroughly.
 
 | Term           | Simplified explanation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 |----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
