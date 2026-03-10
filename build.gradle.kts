@@ -1,10 +1,10 @@
 plugins {
     `java-library`
-    id("org.jetbrains.kotlin.jvm")
-    id("org.jetbrains.kotlin.plugin.allopen")
-    id("io.quarkus")
-    id("com.ncorti.ktfmt.gradle") version "0.25.0"
-    id("io.gitlab.arturbosch.detekt") version "1.23.8"
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.allopen)
+    alias(libs.plugins.quarkus)
+    alias(libs.plugins.ktfmt)
+    alias(libs.plugins.detekt)
 }
 
 repositories {
@@ -12,28 +12,20 @@ repositories {
     mavenLocal()
 }
 
-val quarkusPlatformGroupId: String by project
-val quarkusPlatformArtifactId: String by project
-val quarkusPlatformVersion: String by project
-
 dependencies {
-    implementation(
-        enforcedPlatform(
-            "${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}"
-        )
-    )
-    implementation("io.quarkus:quarkus-rest")
-    implementation("io.quarkus:quarkus-flyway")
-    implementation("io.quarkus:quarkus-rest-jackson")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-    api("io.quarkus:quarkus-jdbc-postgresql")
-    api("io.quarkiverse.fluentjdbc:quarkus-fluentjdbc:1.0.0")
-    implementation("io.quarkus:quarkus-reactive-pg-client")
-    implementation("io.quarkus:quarkus-arc")
-    implementation("io.quarkus:quarkus-kotlin")
-    implementation("com.github.f4b6a3:uuid-creator:6.1.1")
-    testImplementation("io.quarkus:quarkus-junit5")
-    testImplementation("io.rest-assured:rest-assured")
+    implementation(enforcedPlatform(libs.quarkus.bom))
+    implementation(libs.quarkus.rest)
+    implementation(libs.quarkus.flyway)
+    implementation(libs.quarkus.rest.jackson)
+    implementation(libs.jackson.module.kotlin)
+    api(libs.quarkus.jdbc.postgresql)
+    api(libs.quarkus.fluentjdbc)
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.arc)
+    implementation(libs.quarkus.kotlin)
+    implementation(libs.uuid.creator)
+    testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.rest.assured)
 }
 
 group = "io.github.gabrielshanahan"
