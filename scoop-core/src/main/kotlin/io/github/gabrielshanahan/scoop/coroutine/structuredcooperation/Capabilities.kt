@@ -2,6 +2,7 @@ package io.github.gabrielshanahan.scoop.coroutine.structuredcooperation
 
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScope
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
+import io.github.gabrielshanahan.scoop.coroutine.VariableName
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
 import io.github.gabrielshanahan.scoop.coroutine.context.emptyContext
 import io.github.gabrielshanahan.scoop.coroutine.renderAsString
@@ -116,6 +117,39 @@ interface ScopeCapabilities {
      * @throws GaveUpException if any cancellation conditions are met
      */
     fun giveUpIfNecessary(scope: CooperationScope, giveUpSqlProvider: (seenAlias: String) -> String)
+
+    /**
+     * Stores a return value that the parent saga can retrieve after this saga completes.
+     *
+     * @param scope The cooperation scope storing the return value
+     * @param variableName Identifier for this return value
+     * @param value The return value data
+     * @throws ReturnValueAlreadyExistsException if a return value already exists for this tuple
+     */
+    fun storeReturnValue(scope: CooperationScope, variableName: VariableName, value: PGobject)
+
+    /**
+     * Retrieves all return values from direct children for the given variable name.
+     *
+     * @param scope The cooperation scope retrieving return values
+     * @param variableName The identifier used when storing the return values
+     * @return Map of handler name to return value data
+     */
+    fun getReturnValues(scope: CooperationScope, variableName: VariableName): Map<String, PGobject>
+
+    /**
+     * Retrieves a specific return value from a direct child by handler name.
+     *
+     * @param scope The cooperation scope retrieving the return value
+     * @param variableName The identifier used when storing the return value
+     * @param handlerName The name of the specific handler
+     * @return The return value data, or null if not found
+     */
+    fun getReturnValue(
+        scope: CooperationScope,
+        variableName: VariableName,
+        handlerName: String,
+    ): PGobject?
 }
 
 /**
@@ -211,6 +245,7 @@ interface StructuredCooperationCapabilities {
 class Capabilities(
     private val messageRepository: MessageRepository,
     private val messageEventRepository: MessageEventRepository,
+    private val returnValueRepository: ReturnValueRepository,
 ) : ScopeCapabilities, StructuredCooperationCapabilities {
     override fun launchOnGlobalScope(
         connection: Connection,
@@ -332,4 +367,43 @@ class Capabilities(
             throw GaveUpException(exceptions)
         }
     }
+
+    override fun storeReturnValue(
+        scope: CooperationScope,
+        variableName: VariableName,
+        value: PGobject,
+    ) {
+        val handlerName =
+            scope.continuation.continuationIdentifier.distributedCoroutineIdentifier.name
+
+        returnValueRepository.storeReturnValue(
+            scope.connection,
+            scope.scopeIdentifier.cooperationLineage,
+            handlerName,
+            variableName,
+            value,
+        )
+    }
+
+    override fun getReturnValues(
+        scope: CooperationScope,
+        variableName: VariableName,
+    ): Map<String, PGobject> =
+        returnValueRepository.getReturnValues(
+            scope.connection,
+            scope.scopeIdentifier.cooperationLineage,
+            variableName,
+        )
+
+    override fun getReturnValue(
+        scope: CooperationScope,
+        variableName: VariableName,
+        handlerName: String,
+    ): PGobject? =
+        returnValueRepository.getReturnValue(
+            scope.connection,
+            scope.scopeIdentifier.cooperationLineage,
+            variableName,
+            handlerName,
+        )
 }

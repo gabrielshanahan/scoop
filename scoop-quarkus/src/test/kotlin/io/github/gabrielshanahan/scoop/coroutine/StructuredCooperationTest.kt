@@ -28,6 +28,9 @@ abstract class StructuredCooperationTest {
 
     @BeforeEach
     fun cleanupDatabase() {
-        fluentJdbc.query().update("TRUNCATE TABLE message_event, message CASCADE").run()
+        fluentJdbc
+            .query()
+            .update("TRUNCATE TABLE message_event, message, return_value CASCADE")
+            .run()
     }
 }

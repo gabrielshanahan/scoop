@@ -6,6 +6,7 @@ import io.github.gabrielshanahan.scoop.coroutine.EventLoop
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContextModule
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.Capabilities
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.MessageEventRepository
+import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ReturnValueRepository
 import io.github.gabrielshanahan.scoop.messaging.MessageRepository
 import io.github.gabrielshanahan.scoop.messaging.NoOpTopicNotifier
 import io.github.gabrielshanahan.scoop.messaging.PostgresMessageQueue
@@ -52,7 +53,9 @@ private constructor(
             val jsonbHelper = JsonbHelper(objectMapper)
             val messageRepository = MessageRepository(fluentJdbc)
             val messageEventRepository = MessageEventRepository(jsonbHelper, fluentJdbc)
-            val capabilities = Capabilities(messageRepository, messageEventRepository)
+            val returnValueRepository = ReturnValueRepository(fluentJdbc)
+            val capabilities =
+                Capabilities(messageRepository, messageEventRepository, returnValueRepository)
             val eventLoop = EventLoop(fluentJdbc, messageEventRepository, capabilities, jsonbHelper)
             val messageQueue =
                 PostgresMessageQueue(topicNotifier, capabilities, messageRepository, eventLoop)

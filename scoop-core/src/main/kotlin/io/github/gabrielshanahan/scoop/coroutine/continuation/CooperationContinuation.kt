@@ -4,6 +4,7 @@ import io.github.gabrielshanahan.scoop.coroutine.CooperationScope
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
 import io.github.gabrielshanahan.scoop.coroutine.TransactionalStep
+import io.github.gabrielshanahan.scoop.coroutine.VariableName
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.CooperationRoot
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ScopeCapabilities
@@ -82,6 +83,7 @@ internal sealed interface SuspensionPoint {
  * @param scopeCapabilities Provides the implementations of capabilities exposed by
  *   [CooperationScope] that require interacting with the database
  */
+@Suppress("TooManyFunctions")
 internal abstract class BaseCooperationContinuation(
     override val connection: Connection,
     override var context: CooperationContext,
@@ -197,6 +199,15 @@ internal abstract class BaseCooperationContinuation(
 
     override fun giveUpIfNecessary(): Unit =
         scopeCapabilities.giveUpIfNecessary(this, this::giveUpStrategy)
+
+    override fun storeReturnValue(variableName: VariableName, value: PGobject): Unit =
+        scopeCapabilities.storeReturnValue(this, variableName, value)
+
+    override fun getReturnValues(variableName: VariableName): Map<String, PGobject> =
+        scopeCapabilities.getReturnValues(this, variableName)
+
+    override fun getReturnValue(variableName: VariableName, handlerName: String): PGobject? =
+        scopeCapabilities.getReturnValue(this, variableName, handlerName)
 
     /**
      * Resumes execution of this continuation from its suspension point.

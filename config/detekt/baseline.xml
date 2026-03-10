@@ -19,6 +19,7 @@
     <ID>LongMethod:MessageEventsTest.kt$MessageEventsTest$@Test fun `multiple handler instances should coordinate using message events for multiple messages`()</ID>
     <ID>LongMethod:MessageEventsTest.kt$MessageEventsTest$@Test fun `should follow complete message event writing sequence on failed processing`()</ID>
     <ID>LongMethod:PendingCoroutineRunSql.kt$fun candidateSeensWaitingToBeProcessed(eventLoopStrategy: EventLoopStrategy)</ID>
+    <ID>LongMethod:ReturnValueTest.kt$ReturnValueTest$@Test fun `multiple child handlers can each store return values`()</ID>
     <ID>LongMethod:PendingCoroutineRunSqlTest.kt$PendingCoroutineRunSqlTest.ChildRollingBacks$@Test fun `picks up child rolling backs and their terminations`()</ID>
     <ID>LongMethod:RollbackPathContinuation.kt$internal fun DistributedCoroutine.buildRollbackPathContinuation( connection: Connection, coroutineState: CoroutineState, scopeCapabilities: ScopeCapabilities, ): RollbackPathContinuation</ID>
     <ID>LongMethod:RollbackPathTest.kt$RollbackPathTest$@Test fun `a handler failing in its second step should emit ROLLBACK_EMITTEDs for messages emitted in the first step, and then roll it back`()</ID>
