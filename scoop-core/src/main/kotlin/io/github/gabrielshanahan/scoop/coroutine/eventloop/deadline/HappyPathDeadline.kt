@@ -68,35 +68,20 @@ data object HappyPathDeadlineKey : CooperationContext.MappedKey<HappyPathDeadlin
  * @param trace History of deadline combinations that led to this deadline
  */
 data class HappyPathDeadline(
-    val deadline: OffsetDateTime,
-    val source: String,
-    val trace: Set<HappyPathDeadline> = emptySet(),
-) : CancellationToken<HappyPathDeadline>(HappyPathDeadlineKey) {
-    /**
-     * Combines two happy path deadlines by choosing the earlier (more restrictive) one.
-     *
-     * The combination preserves the source information from the earlier deadline and maintains a
-     * complete trace of all deadlines that contributed to the final result.
-     *
-     * @param other The other deadline to combine with
-     * @return Combined deadline with the earlier timestamp and complete trace
-     */
+    override val deadline: OffsetDateTime,
+    override val source: String,
+    override val trace: Set<HappyPathDeadline> = emptySet(),
+) : CancellationToken<HappyPathDeadline>(HappyPathDeadlineKey), Deadline<HappyPathDeadline> {
+
+    override fun create(
+        deadline: OffsetDateTime,
+        source: String,
+        trace: Set<HappyPathDeadline>,
+    ): HappyPathDeadline = HappyPathDeadline(deadline, source, trace)
+
     override fun and(other: HappyPathDeadline): CancellationToken<HappyPathDeadline> {
         check(key == other.key) { "Trying to mix together $key and ${other.key}" }
-
-        val earlierDeadline = minOf(this, other, compareBy { it.deadline })
-        val laterDeadline = if (earlierDeadline == this) other else this
-        return HappyPathDeadline(
-            earlierDeadline.deadline,
-            earlierDeadline.source,
-            earlierDeadline.trace + laterDeadline.asTrace(),
-        )
-    }
-
-    /** Converts this deadline to a trace entry, including its own trace history. */
-    private fun asTrace(): Set<HappyPathDeadline> = buildSet {
-        add(HappyPathDeadline(deadline, source))
-        addAll(trace)
+        return combineWith(other)
     }
 }
 

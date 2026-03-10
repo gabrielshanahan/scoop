@@ -67,35 +67,22 @@ data object RollbackPathDeadlineKey : CooperationContext.MappedKey<RollbackPathD
  * @param trace History of deadline combinations that led to this deadline
  */
 data class RollbackPathDeadline(
-    val deadline: OffsetDateTime,
-    val source: String,
-    val trace: Set<RollbackPathDeadline> = emptySet(),
-) : CancellationToken<RollbackPathDeadline>(RollbackPathDeadlineKey) {
-    /**
-     * Combines two rollback deadlines by choosing the earlier (more restrictive) one.
-     *
-     * The combination preserves the source information from the earlier deadline and maintains a
-     * complete trace of all deadlines that contributed to the final result.
-     *
-     * @param other The other deadline to combine with
-     * @return Combined deadline with the earlier timestamp and complete trace
-     */
+    override val deadline: OffsetDateTime,
+    override val source: String,
+    override val trace: Set<RollbackPathDeadline> = emptySet(),
+) :
+    CancellationToken<RollbackPathDeadline>(RollbackPathDeadlineKey),
+    Deadline<RollbackPathDeadline> {
+
+    override fun create(
+        deadline: OffsetDateTime,
+        source: String,
+        trace: Set<RollbackPathDeadline>,
+    ): RollbackPathDeadline = RollbackPathDeadline(deadline, source, trace)
+
     override fun and(other: RollbackPathDeadline): CancellationToken<RollbackPathDeadline> {
         check(key == other.key) { "Trying to mix together $key and ${other.key}" }
-
-        val earlierDeadline = minOf(this, other, compareBy { it.deadline })
-        val laterDeadline = if (earlierDeadline == this) other else this
-        return RollbackPathDeadline(
-            earlierDeadline.deadline,
-            earlierDeadline.source,
-            earlierDeadline.trace + laterDeadline.asTrace(),
-        )
-    }
-
-    /** Converts this deadline to a trace entry, including its own trace history. */
-    private fun asTrace(): Set<RollbackPathDeadline> = buildSet {
-        add(RollbackPathDeadline(deadline, source))
-        addAll(trace)
+        return combineWith(other)
     }
 }
 
