@@ -23,9 +23,7 @@ dependencies {
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.arc)
     implementation(libs.quarkus.kotlin)
-    implementation(libs.uuid.creator)
     testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.rest.assured)
 }
 
 group = "io.github.gabrielshanahan"
