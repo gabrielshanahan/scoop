@@ -4,12 +4,26 @@ plugins {
     alias(libs.plugins.quarkus) apply false
     alias(libs.plugins.ktfmt) apply false
     alias(libs.plugins.detekt) apply false
+    alias(libs.plugins.nexus.publish)
+}
+
+nexusPublishing {
+    repositories {
+        sonatype {
+            nexusUrl.set(uri("https://s01.oss.sonatype.org/service/local/"))
+            snapshotRepositoryUrl.set(
+                uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+            )
+        }
+    }
 }
 
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "com.ncorti.ktfmt.gradle")
     apply(plugin = "io.gitlab.arturbosch.detekt")
+    apply(plugin = "maven-publish")
+    apply(plugin = "signing")
 
     group = "io.github.gabrielshanahan"
     version = "0.1.0"
@@ -22,6 +36,8 @@ subprojects {
     configure<JavaPluginExtension> {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
+        withSourcesJar()
+        withJavadocJar()
     }
 
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
@@ -68,4 +84,43 @@ subprojects {
     tasks.named("check") { dependsOn("ktfmtCheck", "detekt") }
 
     tasks.register("format") { dependsOn("ktfmtFormat") }
+
+    configure<PublishingExtension> {
+        publications {
+            create<MavenPublication>("mavenJava") {
+                from(components["java"])
+                pom {
+                    name.set(project.name)
+                    description.set("Structured Cooperation for distributed systems")
+                    url.set("https://github.com/gabrielshanahan/scoop")
+                    licenses {
+                        license {
+                            name.set("BSD-3-Clause")
+                            url.set(
+                                "https://opensource.org/licenses/BSD-3-Clause"
+                            )
+                        }
+                    }
+                    developers {
+                        developer {
+                            id.set("gabrielshanahan")
+                            name.set("Gabriel Shanahan")
+                        }
+                    }
+                    scm {
+                        url.set("https://github.com/gabrielshanahan/scoop")
+                        connection.set("scm:git:git://github.com/gabrielshanahan/scoop.git")
+                        developerConnection.set(
+                            "scm:git:ssh://github.com/gabrielshanahan/scoop.git"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    configure<SigningExtension> {
+        isRequired = false
+        sign(extensions.getByType<PublishingExtension>().publications["mavenJava"])
+    }
 }
