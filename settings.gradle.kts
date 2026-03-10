@@ -7,3 +7,5 @@ pluginManagement {
 }
 
 rootProject.name = "scoop"
+
+include("scoop-core")

@@ -43,10 +43,11 @@
     <ID>MagicNumber:util.kt$59</ID>
     <ID>MagicNumber:util.kt$9999</ID>
     <ID>MagicNumber:util.kt$999999000</ID>
+    <ID>MagicNumber:EventLoop.kt$EventLoop$0.02</ID>
+    <ID>TooManyFunctions:EventLoop.kt$EventLoop</ID>
     <ID>MagicNumber:utils.kt$0.02</ID>
     <ID>MatchingDeclarationName:PendingCoroutineRunSql.kt$SQL</ID>
     <ID>MaxLineLength:DeadlineTest.kt$DeadlineTest$"[root handler] MissedHappyPathDeadline: Missed happy path deadline of root handler at ${deadline.get().deadline.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)}. Deadline trace: [{\"HappyPathDeadlineKey\": {\"trace\": [], \"source\": \"root system\", \"deadline\": \"9999-12-31T23:59:59.999999Z\"}}]"</ID>
-    <ID>MaxLineLength:EventLoop.kt$EventLoop$"[${(connection as ConnectionWrapper).unwrap(PgConnection::class.java).backendPID}] Error when starting continuations for coroutine ${distributedCoroutine.identifier}"</ID>
     <ID>MaxLineLength:EventLoopStrategy.kt$EventLoopStrategy$*</ID>
     <ID>MaxLineLength:RollbackPathTest.kt$RollbackPathTest$"[${childHandler1Coroutine.identifier.asSource()}] io.github.gabrielshanahan.scoop.coroutine.eventloop.ChildRollbackFailedException: Child rollback failure occurred while suspended in step [Rollback of 1 (rolling back child scopes)]"</ID>
     <ID>MaxLineLength:RollbackPathTest.kt$RollbackPathTest$"[${rootHandlerCoroutine.identifier.asSource()}] io.github.gabrielshanahan.scoop.coroutine.eventloop.ChildRollbackFailedException: Child rollback failure occurred while suspended in step [Rollback of 1 (rolling back child scopes)]"</ID>
@@ -74,6 +75,5 @@
     <ID>TooGenericExceptionThrown:RollbackPathTest.kt$RollbackPathTest$throw RuntimeException("Simulated failure to test rollback")</ID>
     <ID>TooGenericExceptionThrown:RollbackPathTest.kt$RollbackPathTest.HandleChildFailures$throw RuntimeException("Simulated failure to test rollback")</ID>
     <ID>TooGenericExceptionThrown:TryFinallyTest.kt$TryFinallyTest$throw RuntimeException("Simulated failure to test rollback")</ID>
-    <ID>UnusedPrivateClass:Capabilities.kt$Capabilities : ScopeCapabilitiesStructuredCooperationCapabilities</ID>
   </CurrentIssues>
 </SmellBaseline>

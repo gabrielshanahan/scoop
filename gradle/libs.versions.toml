@@ -3,16 +3,28 @@ kotlin = "2.1.20"              # checked: 2026-03-10
 quarkus = "3.24.5"             # checked: 2026-03-10
 ktfmt = "0.25.0"               # checked: 2026-03-10
 detekt = "1.23.8"              # checked: 2026-03-10
-fluentjdbc = "1.0.0"           # checked: 2026-03-10
+fluentjdbc = "1.8.6"           # checked: 2026-03-10
+quarkus-fluentjdbc = "1.0.0"   # checked: 2026-03-10
+slf4j = "2.0.16"               # checked: 2026-03-10
+jackson = "2.18.3"             # checked: 2026-03-10
+postgresql = "42.7.5"          # checked: 2026-03-10
 
 [libraries]
+# Core (framework-agnostic) dependencies
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+fluentjdbc = { module = "org.codejargon:fluentjdbc", version.ref = "fluentjdbc" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
+
+# Quarkus dependencies
 quarkus-bom = { module = "io.quarkus.platform:quarkus-bom", version.ref = "quarkus" }
 quarkus-rest = { module = "io.quarkus:quarkus-rest" }
 quarkus-flyway = { module = "io.quarkus:quarkus-flyway" }
 quarkus-rest-jackson = { module = "io.quarkus:quarkus-rest-jackson" }
-jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }
+quarkus-jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }
 quarkus-jdbc-postgresql = { module = "io.quarkus:quarkus-jdbc-postgresql" }
-quarkus-fluentjdbc = { module = "io.quarkiverse.fluentjdbc:quarkus-fluentjdbc", version.ref = "fluentjdbc" }
+quarkus-fluentjdbc = { module = "io.quarkiverse.fluentjdbc:quarkus-fluentjdbc", version.ref = "quarkus-fluentjdbc" }
 quarkus-reactive-pg-client = { module = "io.quarkus:quarkus-reactive-pg-client" }
 quarkus-arc = { module = "io.quarkus:quarkus-arc" }
 quarkus-kotlin = { module = "io.quarkus:quarkus-kotlin" }
