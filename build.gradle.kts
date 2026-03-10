@@ -4,15 +4,17 @@ plugins {
     alias(libs.plugins.quarkus) apply false
     alias(libs.plugins.ktfmt) apply false
     alias(libs.plugins.detekt) apply false
+    alias(libs.plugins.maven.publish) apply false
 }
 
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "com.ncorti.ktfmt.gradle")
     apply(plugin = "io.gitlab.arturbosch.detekt")
+    apply(plugin = "com.vanniktech.maven.publish")
 
     group = "io.github.gabrielshanahan"
-    version = "0.1.0"
+    version = rootProject.version
 
     repositories {
         mavenCentral()
@@ -25,9 +27,9 @@ subprojects {
     }
 
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions {
-            jvmTarget = JavaVersion.VERSION_21.toString()
-            javaParameters = true
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+            javaParameters.set(true)
         }
     }
 
@@ -68,4 +70,39 @@ subprojects {
     tasks.named("check") { dependsOn("ktfmtCheck", "detekt") }
 
     tasks.register("format") { dependsOn("ktfmtFormat") }
+
+    configure<com.vanniktech.maven.publish.MavenPublishBaseExtension> {
+        publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
+        if (project.findProperty("signingInMemoryKey") != null ||
+            project.findProperty("signing.keyId") != null) {
+            signAllPublications()
+        }
+
+        coordinates(project.group.toString(), project.name, project.version.toString())
+
+        pom {
+            name.set(project.name)
+            description.set("Structured Cooperation for distributed systems")
+            url.set("https://github.com/gabrielshanahan/scoop")
+            licenses {
+                license {
+                    name.set("BSD-3-Clause")
+                    url.set("https://opensource.org/licenses/BSD-3-Clause")
+                }
+            }
+            developers {
+                developer {
+                    id.set("gabrielshanahan")
+                    name.set("Gabriel Shanahan")
+                }
+            }
+            scm {
+                url.set("https://github.com/gabrielshanahan/scoop")
+                connection.set("scm:git:git://github.com/gabrielshanahan/scoop.git")
+                developerConnection.set(
+                    "scm:git:ssh://github.com/gabrielshanahan/scoop.git"
+                )
+            }
+        }
+    }
 }
