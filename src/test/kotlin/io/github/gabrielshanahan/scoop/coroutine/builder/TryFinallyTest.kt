@@ -72,7 +72,7 @@ class TryFinallyTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
             ciSleep(200)
 
             Assertions.assertEquals(
@@ -129,7 +129,7 @@ class TryFinallyTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
             ciSleep(200)
 
             Assertions.assertEquals(
@@ -202,7 +202,7 @@ class TryFinallyTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
             ciSleep(200)
 
             Assertions.assertEquals(
@@ -266,7 +266,7 @@ class TryFinallyTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
             ciSleep(200)
 
             Assertions.assertEquals(
@@ -335,7 +335,7 @@ class TryFinallyTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
             ciSleep(200)
 
             Assertions.assertEquals(

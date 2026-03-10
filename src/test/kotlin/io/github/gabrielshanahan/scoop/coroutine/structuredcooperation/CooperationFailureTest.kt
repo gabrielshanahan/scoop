@@ -79,7 +79,14 @@ class CooperationFailureTest {
             cooperationException.message,
         )
 
-        assertEquals(EXCEPTION_JSON.trimIndent(), originalCooperationFailureJson)
+        // Compare ignoring line numbers which vary across JDK/Quarkus versions
+        val stripLineNumbers = { s: String ->
+            s.replace(Regex(""""lineNumber" : \d+"""), """"lineNumber" : 0""")
+        }
+        assertEquals(
+            stripLineNumbers(EXCEPTION_JSON.trimIndent()),
+            stripLineNumbers(originalCooperationFailureJson),
+        )
     }
 }
 

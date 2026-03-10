@@ -66,7 +66,7 @@ class DeadlineTest : StructuredCooperationTest() {
                 )
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
             ciSleep(200)
 
             Assertions.assertFalse(

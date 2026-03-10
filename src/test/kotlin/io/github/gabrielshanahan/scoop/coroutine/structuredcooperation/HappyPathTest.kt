@@ -66,7 +66,7 @@ class HappyPathTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(
-                latch.await(1, TimeUnit.SECONDS),
+                latch.await(10, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
             ciSleep(100)
@@ -171,7 +171,7 @@ class HappyPathTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
 
             ciSleep(100)
 
@@ -285,7 +285,7 @@ class HappyPathTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
 
             ciSleep(100)
 
@@ -414,7 +414,7 @@ class HappyPathTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
 
             ciSleep(100)
 

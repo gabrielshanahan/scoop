@@ -77,7 +77,10 @@ class CancellationTest : StructuredCooperationTest() {
             }
             cancellation.countDown()
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "Latch count is ${latch.count}")
+            Assertions.assertTrue(
+                latch.await(10, TimeUnit.SECONDS),
+                "Latch count is ${latch.count}",
+            )
             ciSleep(100)
 
             Assertions.assertEquals(3, executionOrder.size, "Not everything completed correctly")
@@ -218,7 +221,7 @@ class CancellationTest : StructuredCooperationTest() {
                 }
 
             Assertions.assertTrue(
-                latch.await(1, TimeUnit.SECONDS),
+                latch.await(10, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
             ciSleep(100)

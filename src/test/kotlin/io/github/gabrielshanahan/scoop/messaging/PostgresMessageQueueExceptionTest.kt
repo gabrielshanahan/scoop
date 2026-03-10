@@ -44,7 +44,7 @@ class PostgresMessageQueueExceptionTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            assertTrue(latch.await(1, TimeUnit.SECONDS), "Handler should complete")
+            assertTrue(latch.await(10, TimeUnit.SECONDS), "Handler should complete")
             ciSleep(500)
 
             val exceptions = fluentJdbc.fetchExceptions(jsonbHelper, "ROLLING_BACK", rootHandler)

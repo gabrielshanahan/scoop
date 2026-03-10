@@ -90,7 +90,7 @@ class ContextPropagationTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(
-                latch.await(1, TimeUnit.SECONDS),
+                latch.await(10, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
 

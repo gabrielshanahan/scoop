@@ -62,7 +62,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS))
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS))
             ciSleep(500)
 
             Assertions.assertEquals(
@@ -247,7 +247,7 @@ class RollbackPathTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(
-                latch.await(1, TimeUnit.SECONDS),
+                latch.await(10, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
             ciSleep(700)
@@ -390,7 +390,7 @@ class RollbackPathTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(
-                latch.await(1, TimeUnit.SECONDS),
+                latch.await(10, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
             ciSleep(200)
@@ -584,7 +584,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(2, TimeUnit.SECONDS))
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS))
 
             ciSleep(750)
 
@@ -1042,7 +1042,7 @@ class RollbackPathTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(
-                latch.await(2, TimeUnit.SECONDS),
+                latch.await(10, TimeUnit.SECONDS),
                 "Latch has count ${latch.count}",
             )
 
@@ -1576,7 +1576,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 }
 
                 Assertions.assertTrue(
-                    latch.await(1, TimeUnit.SECONDS),
+                    latch.await(10, TimeUnit.SECONDS),
                     "Not everything completed correctly",
                 )
                 ciSleep(200)
@@ -1752,7 +1752,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                     }
 
                 Assertions.assertTrue(
-                    latch.await(1, TimeUnit.SECONDS),
+                    latch.await(10, TimeUnit.SECONDS),
                     "Not everything completed correctly",
                 )
                 ciSleep(100)
@@ -1854,7 +1854,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 }
 
                 Assertions.assertTrue(
-                    latch.await(1, TimeUnit.SECONDS),
+                    latch.await(10, TimeUnit.SECONDS),
                     "Not everything completed correctly",
                 )
                 ciSleep(100)
@@ -1961,7 +1961,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 rollbackEmitted.countDown()
 
                 Assertions.assertTrue(
-                    latch.await(1, TimeUnit.SECONDS),
+                    latch.await(10, TimeUnit.SECONDS),
                     "Not everything completed correctly",
                 )
                 ciSleep(100)

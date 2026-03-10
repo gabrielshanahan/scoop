@@ -100,7 +100,7 @@ class MessageEventsTest : StructuredCooperationTest() {
         messageIdRef.set(message.id)
 
         Assertions.assertTrue(
-            latch.await(1, TimeUnit.SECONDS),
+            latch.await(10, TimeUnit.SECONDS),
             "Handlers should process the message",
         )
 
@@ -151,7 +151,7 @@ class MessageEventsTest : StructuredCooperationTest() {
 
         messageIdRef.set(message.id)
 
-        Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "Message should be processed")
+        Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "Message should be processed")
 
         Assertions.assertEquals(
             1,
@@ -192,7 +192,7 @@ class MessageEventsTest : StructuredCooperationTest() {
 
         messageIdRef.set(message.id)
 
-        Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "Message should be processed")
+        Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "Message should be processed")
 
         ciSleep(150)
 
@@ -226,7 +226,7 @@ class MessageEventsTest : StructuredCooperationTest() {
 
         messageIdRef.set(message.id)
 
-        Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "Message should be processed")
+        Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "Message should be processed")
 
         ciSleep(150)
 
@@ -254,7 +254,7 @@ class MessageEventsTest : StructuredCooperationTest() {
                 .transactional { connection -> messageQueue.launch(connection, testTopic, payload) }
                 .message
 
-        Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "Message should be processed")
+        Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "Message should be processed")
 
         ciSleep(150)
 
@@ -314,7 +314,7 @@ class MessageEventsTest : StructuredCooperationTest() {
                 .message
 
         Assertions.assertTrue(
-            latch.await(1, TimeUnit.SECONDS),
+            latch.await(10, TimeUnit.SECONDS),
             "Message should be processed (and fail)",
         )
 

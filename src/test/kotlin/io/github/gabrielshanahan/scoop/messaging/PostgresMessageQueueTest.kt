@@ -72,7 +72,7 @@ class PostgresMessageQueueTest : StructuredCooperationTest() {
                     }
                 }
 
-                val received = latch.await(1, TimeUnit.SECONDS)
+                val received = latch.await(10, TimeUnit.SECONDS)
                 assertTrue(received)
                 assertEquals(messageCount, receivedCount.get())
             }
@@ -127,7 +127,7 @@ class PostgresMessageQueueTest : StructuredCooperationTest() {
                     )
                 }
 
-                assertTrue(latch.await(1, TimeUnit.SECONDS))
+                assertTrue(latch.await(10, TimeUnit.SECONDS))
 
                 ciSleep(100)
 

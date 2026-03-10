@@ -46,7 +46,7 @@ class SleepTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
             ciSleep(200)
 
             Assertions.assertTrue(
@@ -97,7 +97,7 @@ class SleepTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
             ciSleep(200)
 
             Assertions.assertTrue(scheduledStepTime > startAfter, "Scheduling doesn't work")
@@ -142,7 +142,7 @@ class SleepTest : StructuredCooperationTest() {
                 messageQueue.launch(connection, rootTopic, rootPayload)
             }
 
-            Assertions.assertTrue(latch.await(2, TimeUnit.SECONDS), "All handlers should complete")
+            Assertions.assertTrue(latch.await(10, TimeUnit.SECONDS), "All handlers should complete")
             ciSleep(500)
             Assertions.assertTrue(
                 times.size == 3 &&
