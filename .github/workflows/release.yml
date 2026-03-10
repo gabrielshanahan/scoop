@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: scoop
+          POSTGRES_PASSWORD: scoop
+          POSTGRES_DB: scoop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Bump version
+        id: bump
+        run: |
+          current=$(grep '^version=' gradle.properties | cut -d= -f2)
+          IFS='.' read -r major minor patch <<< "$current"
+          case "${{ github.event.inputs.bump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          next="${major}.${minor}.${patch}"
+          sed -i "s/^version=.*/version=${next}/" gradle.properties
+          echo "version=${next}" >> "$GITHUB_OUTPUT"
+          echo "Bumped version: ${current} -> ${next}"
+
+      - name: Build scoop-core
+        run: ./gradlew :scoop-core:build
+
+      - name: Build scoop-quarkus
+        run: ./gradlew :scoop-quarkus:build
+        env:
+          QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://localhost:5432/scoop
+          QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://localhost:5432/scoop
+          QUARKUS_DATASOURCE_USERNAME: scoop
+          QUARKUS_DATASOURCE_PASSWORD: scoop
+          CI_TIMEOUT_MULTIPLIER: 3
+
+      - name: Publish to Maven Central
+        run: ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository
+        env:
+          ORG_GRADLE_PROJECT_sonatypeUsername: ${{ secrets.OSSRH_USERNAME }}
+          ORG_GRADLE_PROJECT_sonatypePassword: ${{ secrets.OSSRH_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Commit version bump and tag
+        run: |
+          version="${{ steps.bump.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gradle.properties
+          git commit -m "Release v${version}"
+          git tag "v${version}"
+          git push origin HEAD --tags

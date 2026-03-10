@@ -26,7 +26,7 @@ subprojects {
     apply(plugin = "signing")
 
     group = "io.github.gabrielshanahan"
-    version = "0.1.0"
+    version = rootProject.version
 
     repositories {
         mavenCentral()
@@ -121,6 +121,11 @@ subprojects {
 
     configure<SigningExtension> {
         isRequired = false
+        val signingKey = findProperty("signingKey") as String?
+        val signingPassword = findProperty("signingPassword") as String?
+        if (signingKey != null) {
+            useInMemoryPgpKeys(signingKey, signingPassword ?: "")
+        }
         sign(extensions.getByType<PublishingExtension>().publications["mavenJava"])
     }
 }
