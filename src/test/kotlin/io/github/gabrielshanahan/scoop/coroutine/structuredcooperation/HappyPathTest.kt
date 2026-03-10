@@ -2,6 +2,7 @@ package io.github.gabrielshanahan.scoop.coroutine.structuredcooperation
 
 import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
 import io.github.gabrielshanahan.scoop.coroutine.builder.saga
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.coroutine.getEventSequence
 import io.github.gabrielshanahan.scoop.coroutine.keepOnlyHandlers
 import io.github.gabrielshanahan.scoop.coroutine.keepOnlyPrefixedBy
@@ -47,7 +48,7 @@ class HappyPathTest : StructuredCooperationTest() {
                 childTopic,
                 saga("child-handler", handlerRegistry.eventLoopStrategy()) {
                     step { scope, message ->
-                        Thread.sleep(100)
+                        ciSleep(100)
                         latch.countDown()
                         executionOrder.add("child-handler-step-1")
                     }
@@ -68,7 +69,7 @@ class HappyPathTest : StructuredCooperationTest() {
                 latch.await(1, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
-            Thread.sleep(100)
+            ciSleep(100)
 
             Assertions.assertEquals(4, executionOrder.size, "Not everything completed correctly")
             Assertions.assertEquals(
@@ -153,7 +154,7 @@ class HappyPathTest : StructuredCooperationTest() {
                 grandchildTopic,
                 saga("grandchild-handler", handlerRegistry.eventLoopStrategy()) {
                     step { scope, message ->
-                        Thread.sleep(200)
+                        ciSleep(200)
                         executionOrder.add("grandchild-handler-step-1")
                         latch.countDown()
                     }
@@ -172,7 +173,7 @@ class HappyPathTest : StructuredCooperationTest() {
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
 
-            Thread.sleep(100)
+            ciSleep(100)
 
             Assertions.assertEquals(7, executionOrder.size, "Not everything completed correctly")
             Assertions.assertEquals(
@@ -251,7 +252,7 @@ class HappyPathTest : StructuredCooperationTest() {
                 childTopic,
                 saga("child-handler-1", handlerRegistry.eventLoopStrategy()) {
                     step { scope, message ->
-                        Thread.sleep(100)
+                        ciSleep(100)
                         executionOrder.add("child-handler-1-step-1")
                         latch.countDown()
                     }
@@ -271,7 +272,7 @@ class HappyPathTest : StructuredCooperationTest() {
                         latch.countDown()
                     }
                     step { scope, message ->
-                        Thread.sleep(300)
+                        ciSleep(300)
                         executionOrder.add("child-handler-2-step-2")
                         latch.countDown()
                     }
@@ -286,7 +287,7 @@ class HappyPathTest : StructuredCooperationTest() {
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
 
-            Thread.sleep(100)
+            ciSleep(100)
 
             Assertions.assertEquals(6, executionOrder.size, "Not everything completed correctly")
 
@@ -380,7 +381,7 @@ class HappyPathTest : StructuredCooperationTest() {
                 childTopic,
                 saga("child-handler-1", handlerRegistry.eventLoopStrategy()) {
                     step { scope, message ->
-                        Thread.sleep(100)
+                        ciSleep(100)
                         executionOrder.add("child-handler-1-step-1")
                         latch.countDown()
                     }
@@ -396,7 +397,7 @@ class HappyPathTest : StructuredCooperationTest() {
                 childTopic,
                 saga("child-handler-2", handlerRegistry.eventLoopStrategy()) {
                     step { scope, message ->
-                        Thread.sleep(300)
+                        ciSleep(300)
                         executionOrder.add("child-handler-2-step-1")
                         latch.countDown()
                     }
@@ -415,7 +416,7 @@ class HappyPathTest : StructuredCooperationTest() {
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
 
-            Thread.sleep(100)
+            ciSleep(100)
 
             Assertions.assertEquals(6, executionOrder.size, "Not everything completed correctly")
 

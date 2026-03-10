@@ -5,6 +5,7 @@ import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
 import io.github.gabrielshanahan.scoop.coroutine.asSource
 import io.github.gabrielshanahan.scoop.coroutine.assertEquivalent
 import io.github.gabrielshanahan.scoop.coroutine.builder.saga
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.coroutine.fetchExceptions
 import io.github.gabrielshanahan.scoop.coroutine.getEventSequence
 import io.github.gabrielshanahan.scoop.messaging.eventLoopStrategy
@@ -66,7 +67,7 @@ class DeadlineTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertFalse(
                 childStarted.get(),

@@ -1,6 +1,7 @@
 package io.github.gabrielshanahan.scoop.coroutine.builder
 
 import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.coroutine.getEventSequence
 import io.github.gabrielshanahan.scoop.messaging.eventLoopStrategy
 import io.github.gabrielshanahan.scoop.transactional
@@ -46,7 +47,7 @@ class SleepTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertTrue(
                 step3Time.toEpochMilli() - step1Time.toEpochMilli() > 500,
@@ -97,7 +98,7 @@ class SleepTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertTrue(scheduledStepTime > startAfter, "Scheduling doesn't work")
             Assertions.assertEquals(
@@ -142,7 +143,7 @@ class SleepTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(2, TimeUnit.SECONDS), "All handlers should complete")
-            Thread.sleep(500)
+            ciSleep(500)
             Assertions.assertTrue(
                 times.size == 3 &&
                     times[1].toEpochMilli() - times[0].toEpochMilli() >

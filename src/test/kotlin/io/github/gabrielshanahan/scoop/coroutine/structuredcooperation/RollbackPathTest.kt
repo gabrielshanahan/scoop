@@ -6,6 +6,7 @@ import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
 import io.github.gabrielshanahan.scoop.coroutine.asSource
 import io.github.gabrielshanahan.scoop.coroutine.assertEquivalent
 import io.github.gabrielshanahan.scoop.coroutine.builder.saga
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
 import io.github.gabrielshanahan.scoop.coroutine.context.has
 import io.github.gabrielshanahan.scoop.coroutine.fetchExceptions
@@ -62,7 +63,7 @@ class RollbackPathTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS))
-            Thread.sleep(500)
+            ciSleep(500)
 
             Assertions.assertEquals(
                 listOf(
@@ -135,7 +136,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 latch.await(100, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
-            Thread.sleep(100)
+            ciSleep(100)
 
             Assertions.assertEquals(
                 listOf(
@@ -249,7 +250,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 latch.await(1, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
-            Thread.sleep(700)
+            ciSleep(700)
 
             Assertions.assertEquals(
                 listOf(
@@ -392,7 +393,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 latch.await(1, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertEquals(
                 listOf(
@@ -566,7 +567,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 step(
                     { scope, message ->
                         latch.countDown()
-                        Thread.sleep(200)
+                        ciSleep(200)
                         executionOrder.add("grandchild-handler-step-2")
                     },
                     rollback = { scope, message, throwable ->
@@ -585,7 +586,7 @@ class RollbackPathTest : StructuredCooperationTest() {
 
             Assertions.assertTrue(latch.await(2, TimeUnit.SECONDS))
 
-            Thread.sleep(750)
+            ciSleep(750)
 
             Assertions.assertEquals(18, executionOrder.size)
 
@@ -1022,7 +1023,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 )
                 step(
                     { scope, message ->
-                        Thread.sleep(200)
+                        ciSleep(200)
                         executionOrder.add("grandchild-handler-step-2")
                         latch.countDown()
                     },
@@ -1045,7 +1046,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                 "Latch has count ${latch.count}",
             )
 
-            Thread.sleep(750)
+            ciSleep(750)
 
             Assertions.assertEquals(16, executionOrder.size)
 
@@ -1578,7 +1579,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                     latch.await(1, TimeUnit.SECONDS),
                     "Not everything completed correctly",
                 )
-                Thread.sleep(200)
+                ciSleep(200)
 
                 Assertions.assertEquals(
                     listOf(
@@ -1754,7 +1755,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                     latch.await(1, TimeUnit.SECONDS),
                     "Not everything completed correctly",
                 )
-                Thread.sleep(100)
+                ciSleep(100)
 
                 fluentJdbc.transactional { connection ->
                     structuredCooperationCapabilities.rollback(
@@ -1769,7 +1770,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                     rollbackLatch.await(1, TimeUnit.SECONDS),
                     "Not everything rolled back correctly",
                 )
-                Thread.sleep(100)
+                ciSleep(100)
 
                 Assertions.assertEquals(
                     listOf(
@@ -1856,7 +1857,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                     latch.await(1, TimeUnit.SECONDS),
                     "Not everything completed correctly",
                 )
-                Thread.sleep(100)
+                ciSleep(100)
 
                 fluentJdbc.transactional { connection ->
                     structuredCooperationCapabilities.rollback(
@@ -1871,7 +1872,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                     rollbackLatch.await(1, TimeUnit.SECONDS),
                     "Not everything rolled back correctly",
                 )
-                Thread.sleep(100)
+                ciSleep(100)
 
                 Assertions.assertEquals(
                     listOf(
@@ -1963,7 +1964,7 @@ class RollbackPathTest : StructuredCooperationTest() {
                     latch.await(1, TimeUnit.SECONDS),
                     "Not everything completed correctly",
                 )
-                Thread.sleep(100)
+                ciSleep(100)
 
                 Assertions.assertEquals(
                     listOf(

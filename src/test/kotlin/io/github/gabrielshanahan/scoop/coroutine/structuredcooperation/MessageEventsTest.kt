@@ -2,6 +2,7 @@ package io.github.gabrielshanahan.scoop.coroutine.structuredcooperation
 
 import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
 import io.github.gabrielshanahan.scoop.coroutine.builder.saga
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.messaging.eventLoopStrategy
 import io.github.gabrielshanahan.scoop.transactional
 import io.quarkus.test.junit.QuarkusTest
@@ -193,7 +194,7 @@ class MessageEventsTest : StructuredCooperationTest() {
 
         Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "Message should be processed")
 
-        Thread.sleep(150)
+        ciSleep(150)
 
         val committedCount = countMessageEvents(handlerName, message.id, "COMMITTED")
         Assertions.assertEquals(1, committedCount, "There should be exactly one COMMITTED event")
@@ -227,7 +228,7 @@ class MessageEventsTest : StructuredCooperationTest() {
 
         Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "Message should be processed")
 
-        Thread.sleep(150)
+        ciSleep(150)
 
         val rolledBackCount = countMessageEvents(handlerName, message.id, "ROLLED_BACK")
         Assertions.assertEquals(1, rolledBackCount, "There should be exactly one ROLLED_BACK event")
@@ -255,7 +256,7 @@ class MessageEventsTest : StructuredCooperationTest() {
 
         Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "Message should be processed")
 
-        Thread.sleep(150)
+        ciSleep(150)
 
         val emittedCount = countMessageEvents(message.id, "EMITTED")
         val seenCount = countMessageEvents(handlerName, message.id, "SEEN")
@@ -317,7 +318,7 @@ class MessageEventsTest : StructuredCooperationTest() {
             "Message should be processed (and fail)",
         )
 
-        Thread.sleep(1000)
+        ciSleep(1000)
 
         val emittedCount = countMessageEvents(message.id, "EMITTED")
         val seenCount = countMessageEvents(handlerName, message.id, "SEEN")
@@ -407,7 +408,7 @@ class MessageEventsTest : StructuredCooperationTest() {
             countDownLatch.await(1, TimeUnit.SECONDS),
             "All messages should be processed",
         )
-        Thread.sleep(100)
+        ciSleep(100)
 
         Assertions.assertEquals(
             messageCount,

@@ -1,6 +1,7 @@
 package io.github.gabrielshanahan.scoop.coroutine.builder
 
 import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.messaging.eventLoopStrategy
 import io.github.gabrielshanahan.scoop.transactional
 import io.quarkus.test.junit.QuarkusTest
@@ -72,7 +73,7 @@ class TryFinallyTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertEquals(
                 listOf("root-try", "child-handler", "root-finally", "finally-handler", "root-end"),
@@ -129,7 +130,7 @@ class TryFinallyTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertEquals(
                 listOf("root-try", "root-finally"),
@@ -202,7 +203,7 @@ class TryFinallyTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertEquals(
                 listOf("root-try", "child-handler", "root-finally", "finally-handler"),
@@ -266,7 +267,7 @@ class TryFinallyTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertEquals(
                 listOf(
@@ -335,7 +336,7 @@ class TryFinallyTest : StructuredCooperationTest() {
             }
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "All handlers should complete")
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertEquals(
                 listOf(

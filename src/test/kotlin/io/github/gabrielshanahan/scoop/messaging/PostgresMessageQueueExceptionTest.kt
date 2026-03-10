@@ -2,6 +2,7 @@ package io.github.gabrielshanahan.scoop.messaging
 
 import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
 import io.github.gabrielshanahan.scoop.coroutine.builder.saga
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.coroutine.fetchExceptions
 import io.github.gabrielshanahan.scoop.transactional
 import io.quarkus.test.junit.QuarkusTest
@@ -44,7 +45,7 @@ class PostgresMessageQueueExceptionTest : StructuredCooperationTest() {
             }
 
             assertTrue(latch.await(1, TimeUnit.SECONDS), "Handler should complete")
-            Thread.sleep(500)
+            ciSleep(500)
 
             val exceptions = fluentJdbc.fetchExceptions(jsonbHelper, "ROLLING_BACK", rootHandler)
 

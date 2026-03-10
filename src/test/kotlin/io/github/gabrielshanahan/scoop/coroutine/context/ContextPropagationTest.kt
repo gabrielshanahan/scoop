@@ -2,6 +2,7 @@ package io.github.gabrielshanahan.scoop.coroutine.context
 
 import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
 import io.github.gabrielshanahan.scoop.coroutine.builder.saga
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.messaging.eventLoopStrategy
 import io.github.gabrielshanahan.scoop.transactional
 import io.quarkus.test.junit.QuarkusTest
@@ -93,7 +94,7 @@ class ContextPropagationTest : StructuredCooperationTest() {
                 "Not everything completed correctly",
             )
 
-            Thread.sleep(200)
+            ciSleep(200)
 
             Assertions.assertEquals(
                 listOf(

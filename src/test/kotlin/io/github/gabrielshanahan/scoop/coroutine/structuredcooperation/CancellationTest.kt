@@ -5,6 +5,7 @@ import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
 import io.github.gabrielshanahan.scoop.coroutine.asSource
 import io.github.gabrielshanahan.scoop.coroutine.assertEquivalent
 import io.github.gabrielshanahan.scoop.coroutine.builder.saga
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.coroutine.fetchExceptions
 import io.github.gabrielshanahan.scoop.coroutine.getEventSequence
 import io.github.gabrielshanahan.scoop.messaging.eventLoopStrategy
@@ -50,7 +51,7 @@ class CancellationTest : StructuredCooperationTest() {
             saga("child-handler", handlerRegistry.eventLoopStrategy()) {
                 step { scope, message ->
                     childIsExecuting.countDown()
-                    Thread.sleep(100)
+                    ciSleep(100)
                     latch.countDown()
                     executionOrder.add("child-handler-step-1")
                     cancellation.await()
@@ -77,7 +78,7 @@ class CancellationTest : StructuredCooperationTest() {
             cancellation.countDown()
 
             Assertions.assertTrue(latch.await(1, TimeUnit.SECONDS), "Latch count is ${latch.count}")
-            Thread.sleep(100)
+            ciSleep(100)
 
             Assertions.assertEquals(3, executionOrder.size, "Not everything completed correctly")
             Assertions.assertEquals(
@@ -202,7 +203,7 @@ class CancellationTest : StructuredCooperationTest() {
                 childTopic,
                 saga("child-handler", handlerRegistry.eventLoopStrategy()) {
                     step { scope, message ->
-                        Thread.sleep(100)
+                        ciSleep(100)
                         latch.countDown()
                         executionOrder.add("child-handler-step-1")
                     }
@@ -220,7 +221,7 @@ class CancellationTest : StructuredCooperationTest() {
                 latch.await(1, TimeUnit.SECONDS),
                 "Not everything completed correctly",
             )
-            Thread.sleep(100)
+            ciSleep(100)
 
             fluentJdbc.transactional { connection ->
                 structuredCooperationCapabilities.cancel(

@@ -6,6 +6,13 @@ import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.Cooperati
 import org.codejargon.fluentjdbc.api.FluentJdbc
 import org.junit.jupiter.api.Assertions.assertEquals
 
+private val CI_TIMEOUT_MULTIPLIER: Long =
+    System.getenv("CI_TIMEOUT_MULTIPLIER")?.toLongOrNull() ?: 1L
+
+fun ciSleep(millis: Long) {
+    Thread.sleep(millis * CI_TIMEOUT_MULTIPLIER)
+}
+
 fun List<Triple<String, String?, String?>>.printEventSequenceCode():
     List<Triple<String, String?, String?>> = also {
     println(

@@ -3,6 +3,7 @@ package io.github.gabrielshanahan.scoop.messaging
 import io.agroal.pool.wrapper.ConnectionWrapper
 import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
 import io.github.gabrielshanahan.scoop.coroutine.builder.saga
+import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.transactional
 import io.quarkus.test.junit.QuarkusTest
 import java.util.concurrent.CountDownLatch
@@ -44,7 +45,7 @@ class PostgresMessageQueueTest : StructuredCooperationTest() {
         assertEquals(testPayloadMap["text"], persistedMessageMap["text"])
         assertEquals(testPayloadMap["priority"], persistedMessageMap["priority"])
         assertNotNull(persistedMessage.createdAt)
-        Thread.sleep(200)
+        ciSleep(200)
     }
 
     @Test
@@ -75,7 +76,7 @@ class PostgresMessageQueueTest : StructuredCooperationTest() {
                 assertTrue(received)
                 assertEquals(messageCount, receivedCount.get())
             }
-        Thread.sleep(200)
+        ciSleep(200)
     }
 
     @Test
@@ -128,7 +129,7 @@ class PostgresMessageQueueTest : StructuredCooperationTest() {
 
                 assertTrue(latch.await(1, TimeUnit.SECONDS))
 
-                Thread.sleep(100)
+                ciSleep(100)
 
                 assertEquals(2, successMessageIndex.get())
                 assertEquals(1, failedMessageIndex.get())
@@ -146,6 +147,6 @@ class PostgresMessageQueueTest : StructuredCooperationTest() {
                     "Only one message should have been published to otherTopic",
                 )
             }
-        Thread.sleep(200)
+        ciSleep(200)
     }
 }
