@@ -1,6 +1,5 @@
 package io.github.gabrielshanahan.scoop.coroutine.structuredcooperation
 
-import com.github.f4b6a3.uuid.UuidCreator
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScope
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
@@ -8,6 +7,7 @@ import io.github.gabrielshanahan.scoop.coroutine.context.emptyContext
 import io.github.gabrielshanahan.scoop.coroutine.renderAsString
 import io.github.gabrielshanahan.scoop.messaging.Message
 import io.github.gabrielshanahan.scoop.messaging.MessageRepository
+import io.github.gabrielshanahan.scoop.util.uuidV7
 import jakarta.enterprise.context.ApplicationScoped
 import java.sql.Connection
 import org.postgresql.util.PGobject
@@ -221,7 +221,7 @@ private class Capabilities(
         context: CooperationContext?,
     ): CooperationRoot {
         val message = messageRepository.insertMessage(connection, topic, payload)
-        val cooperationId = UuidCreator.getTimeOrderedEpoch()
+        val cooperationId = uuidV7()
         val cooperationLineage = listOf(cooperationId)
         messageEventRepository.insertGlobalEmittedEvent(
             connection,

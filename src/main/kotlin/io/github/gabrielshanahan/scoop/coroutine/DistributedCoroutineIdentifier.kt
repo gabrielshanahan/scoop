@@ -1,6 +1,6 @@
 package io.github.gabrielshanahan.scoop.coroutine
 
-import com.github.f4b6a3.uuid.UuidCreator
+import io.github.gabrielshanahan.scoop.util.uuidV7
 
 /**
  * Identifies a distributed coroutine (saga) implementation, with support for horizontal scaling.
@@ -39,7 +39,7 @@ data class DistributedCoroutineIdentifier(val name: String, val instance: String
      *
      * @param name The saga type/handler name
      */
-    constructor(name: String) : this(name, UuidCreator.getTimeOrderedEpoch().toString())
+    constructor(name: String) : this(name, uuidV7().toString())
 }
 
 /**

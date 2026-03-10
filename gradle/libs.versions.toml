@@ -4,7 +4,6 @@ quarkus = "3.24.5"             # checked: 2026-03-10
 ktfmt = "0.25.0"               # checked: 2026-03-10
 detekt = "1.23.8"              # checked: 2026-03-10
 fluentjdbc = "1.0.0"           # checked: 2026-03-10
-uuid-creator = "6.1.1"         # checked: 2026-03-10
 
 [libraries]
 quarkus-bom = { module = "io.quarkus.platform:quarkus-bom", version.ref = "quarkus" }
@@ -17,9 +16,7 @@ quarkus-fluentjdbc = { module = "io.quarkiverse.fluentjdbc:quarkus-fluentjdbc", 
 quarkus-reactive-pg-client = { module = "io.quarkus:quarkus-reactive-pg-client" }
 quarkus-arc = { module = "io.quarkus:quarkus-arc" }
 quarkus-kotlin = { module = "io.quarkus:quarkus-kotlin" }
-uuid-creator = { module = "com.github.f4b6a3:uuid-creator", version.ref = "uuid-creator" }
 quarkus-junit5 = { module = "io.quarkus:quarkus-junit5" }
-rest-assured = { module = "io.rest-assured:rest-assured" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
