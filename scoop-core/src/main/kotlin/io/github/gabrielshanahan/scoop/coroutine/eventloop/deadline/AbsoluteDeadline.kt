@@ -84,35 +84,20 @@ data object AbsoluteDeadlineKey : CooperationContext.MappedKey<AbsoluteDeadline>
  * @param trace History of deadline combinations that led to this deadline
  */
 data class AbsoluteDeadline(
-    val deadline: OffsetDateTime,
-    val source: String,
-    val trace: Set<AbsoluteDeadline> = emptySet(),
-) : CancellationToken<AbsoluteDeadline>(AbsoluteDeadlineKey) {
-    /**
-     * Combines two absolute deadlines by choosing the earlier (more restrictive) one.
-     *
-     * The combination preserves the source information from the earlier deadline and maintains a
-     * complete trace of all deadlines that contributed to the final result.
-     *
-     * @param other The other deadline to combine with
-     * @return Combined deadline with the earlier timestamp and complete trace
-     */
+    override val deadline: OffsetDateTime,
+    override val source: String,
+    override val trace: Set<AbsoluteDeadline> = emptySet(),
+) : CancellationToken<AbsoluteDeadline>(AbsoluteDeadlineKey), Deadline<AbsoluteDeadline> {
+
+    override fun create(
+        deadline: OffsetDateTime,
+        source: String,
+        trace: Set<AbsoluteDeadline>,
+    ): AbsoluteDeadline = AbsoluteDeadline(deadline, source, trace)
+
     override fun and(other: AbsoluteDeadline): CancellationToken<AbsoluteDeadline> {
         check(key == other.key) { "Trying to mix together $key and ${other.key}" }
-
-        val earlierDeadline = minOf(this, other, compareBy { it.deadline })
-        val laterDeadline = if (earlierDeadline == this) other else this
-        return AbsoluteDeadline(
-            earlierDeadline.deadline,
-            earlierDeadline.source,
-            earlierDeadline.trace + laterDeadline.asTrace(),
-        )
-    }
-
-    /** Converts this deadline to a trace entry, including its own trace history. */
-    private fun asTrace(): Set<AbsoluteDeadline> = buildSet {
-        add(AbsoluteDeadline(deadline, source))
-        addAll(trace)
+        return combineWith(other)
     }
 }
 

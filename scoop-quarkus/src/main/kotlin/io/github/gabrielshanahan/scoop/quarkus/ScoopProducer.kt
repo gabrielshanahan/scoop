@@ -5,6 +5,7 @@ import io.github.gabrielshanahan.scoop.JsonbHelper
 import io.github.gabrielshanahan.scoop.coroutine.EventLoop
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.Capabilities
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.MessageEventRepository
+import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ReturnValueRepository
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ScopeCapabilities
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.StructuredCooperationCapabilities
 import io.github.gabrielshanahan.scoop.messaging.MessageRepository
@@ -41,17 +42,25 @@ class ScoopProducer(
 
     @Produces
     @ApplicationScoped
+    fun returnValueRepository(): ReturnValueRepository = ReturnValueRepository(fluentJdbc)
+
+    @Produces
+    @ApplicationScoped
     fun scopeCapabilities(
         messageRepository: MessageRepository,
         messageEventRepository: MessageEventRepository,
-    ): ScopeCapabilities = Capabilities(messageRepository, messageEventRepository)
+        returnValueRepository: ReturnValueRepository,
+    ): ScopeCapabilities =
+        Capabilities(messageRepository, messageEventRepository, returnValueRepository)
 
     @Produces
     @ApplicationScoped
     fun structuredCooperationCapabilities(
         messageRepository: MessageRepository,
         messageEventRepository: MessageEventRepository,
-    ): StructuredCooperationCapabilities = Capabilities(messageRepository, messageEventRepository)
+        returnValueRepository: ReturnValueRepository,
+    ): StructuredCooperationCapabilities =
+        Capabilities(messageRepository, messageEventRepository, returnValueRepository)
 
     @Produces
     @ApplicationScoped

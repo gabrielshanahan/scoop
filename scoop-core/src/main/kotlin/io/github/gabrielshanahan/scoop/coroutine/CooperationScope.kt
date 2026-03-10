@@ -203,4 +203,39 @@ interface CooperationScope {
      * for another example of a custom strategy that implements specialized logic.
      */
     fun giveUpIfNecessary()
+
+    /**
+     * Stores a return value that the parent saga can retrieve after this saga completes.
+     *
+     * The return value is keyed by the current cooperation lineage, handler name, and variable
+     * name. The handler name is automatically obtained from the continuation identifier. This
+     * should typically be called near the end of a saga's final step.
+     *
+     * @param variableName Identifier for this return value (provided by caller via context)
+     * @param value The return value data
+     * @throws
+     *   io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ReturnValueAlreadyExistsException
+     *   if a return value already exists for this tuple
+     */
+    fun storeReturnValue(variableName: VariableName, value: PGobject)
+
+    /**
+     * Retrieves all return values from direct children for the given variable name.
+     *
+     * Due to structured cooperation, when a parent saga resumes after children complete, the
+     * children's return values are guaranteed to be present.
+     *
+     * @param variableName The identifier used when storing the return values
+     * @return Map of handler name to return value data
+     */
+    fun getReturnValues(variableName: VariableName): Map<String, PGobject>
+
+    /**
+     * Retrieves a specific return value from a direct child by handler name.
+     *
+     * @param variableName The identifier used when storing the return value
+     * @param handlerName The name of the specific handler
+     * @return The return value data, or null if not found
+     */
+    fun getReturnValue(variableName: VariableName, handlerName: String): PGobject?
 }
