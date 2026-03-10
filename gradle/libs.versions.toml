@@ -5,6 +5,7 @@ ktfmt = "0.25.0"               # checked: 2026-03-10
 detekt = "1.23.8"              # checked: 2026-03-10
 fluentjdbc = "1.8.6"           # checked: 2026-03-10
 quarkus-fluentjdbc = "1.0.0"   # checked: 2026-03-10
+maven-publish = "0.32.0"        # checked: 2026-03-10 (0.33+ requires Kotlin 2.2+)
 slf4j = "2.0.16"               # checked: 2026-03-10
 jackson = "2.18.3"             # checked: 2026-03-10
 postgresql = "42.7.5"          # checked: 2026-03-10
@@ -36,3 +37,4 @@ kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "ko
 quarkus = { id = "io.quarkus", version.ref = "quarkus" }
 ktfmt = { id = "com.ncorti.ktfmt.gradle", version.ref = "ktfmt" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "maven-publish" }

@@ -35,10 +35,17 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - run: ./gradlew build
+      - name: Build scoop-core
+        run: ./gradlew :scoop-core:build
+
+      - name: Build scoop-quarkus
+        run: ./gradlew :scoop-quarkus:build
         env:
           QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://localhost:5432/scoop
           QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://localhost:5432/scoop
           QUARKUS_DATASOURCE_USERNAME: scoop
           QUARKUS_DATASOURCE_PASSWORD: scoop
           CI_TIMEOUT_MULTIPLIER: 3
+
+      - name: Verify publishable artifacts
+        run: ./gradlew publishToMavenLocal
