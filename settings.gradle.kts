@@ -8,4 +8,4 @@ pluginManagement {
 
 rootProject.name = "scoop"
 
-include("scoop-core")
+include("scoop-core", "scoop-quarkus")
