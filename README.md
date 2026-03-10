@@ -2,6 +2,10 @@
 
 <img src="img.png" alt="An ice-cream scoop icon" width="150"/>
 
+> **Coming from the blog posts and looking for the reactive version?**
+> The codebase has been simplified to a blocking-only implementation. The original version with both reactive and blocking implementations
+> is available in [the first commit](https://github.com/gabrielshanahan/scoop/tree/aa775f8).
+
 ## TL;DR
 This repository contains Scoop, a proof-of-concept implementation of **structured cooperation**. It is interesting for you if
 you interact at all with distributed architectures (e.g., microservices). To understand what **structured cooperation** is, read
@@ -108,42 +112,42 @@ Start by reading the first two articles above. Then, read about [the important c
 understanding of how Scoop is structured. 
 
 Then, pretty much follow the diagram in that section. First, learn about how you interact with the library:
-* How sagas are built and represented in the code ([SagaBuilder](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/builder/SagaBuilder.kt), 
-[DistributedCoroutine](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/DistributedCoroutine.kt)). Don't worry about [EventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/eventloop/strategy/EventLoopStrategy.kt)
+* How sagas are built and represented in the code ([SagaBuilder](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/SagaBuilder.kt), 
+[DistributedCoroutine](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/DistributedCoroutine.kt)). Don't worry about [EventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/EventLoopStrategy.kt)
   at this stage.
-* How they are subscribed to topics and how messages are emitted ([PostgresMessageQueue](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/messaging/PostgresMessageQueue.kt)). Don't worry about [HandlerRegistry](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/messaging/HandlerRegistry.kt)
+* How they are subscribed to topics and how messages are emitted ([PostgresMessageQueue](src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/PostgresMessageQueue.kt)). Don't worry about [HandlerRegistry](src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/HandlerRegistry.kt)
   at this stage).
 
 Next, follow the execution flow when a saga is picked up for handling (basically, what is depicted on the diagram below). Go as deep as you need to, but only as
 far as you encounter any SQL—just trust it for now.
-* Start in [EventLoop](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/EventLoop.kt), and understand the two steps a `tick` is made of (i.e., starting continuations and resuming coroutines).
+* Start in [EventLoop](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/EventLoop.kt), and understand the two steps a `tick` is made of (i.e., starting continuations and resuming coroutines).
 * Next, focus on how coroutines are resumed:
   * What state is fetched (not how—trust the SQL for now),
-  * What a [Continuation](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/continuation/Continuation.kt) is (leave `resumeWith` for the next step, 
-    and also ignore the fact that it coincides with the [CooperationScope](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/CooperationScope.kt), you'll come back to `CooperationScope` later), its
-    [happy](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/continuation/HappyPathContinuation.kt) and
-    [rollback](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/continuation/RollbackPathContinuation.kt) flavors, 
+  * What a [Continuation](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/continuation/Continuation.kt) is (leave `resumeWith` for the next step, 
+    and also ignore the fact that it coincides with the [CooperationScope](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/CooperationScope.kt), you'll come back to `CooperationScope` later), its
+    [happy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/continuation/HappyPathContinuation.kt) and
+    [rollback](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/continuation/RollbackPathContinuation.kt) flavors, 
     and how it's built from the `CoroutineState`
   * How `resumeWith` works
 * Finally, understand what happens based on the result of `resumeWith`
 
-At this point, go back and take a separate look at [CooperationScope](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/CooperationScope.kt), 
+At this point, go back and take a separate look at [CooperationScope](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/CooperationScope.kt), 
 what capabilities it provides, and why it so happens that the `Continuation` instance can coincide with the `CooperationScope` instance.
 
 Then, take a look at the SQL and `EventLoopStrategy`:
-* The "start continuations" SQL in [MessageEventRepository](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/structuredcooperation/MessageEventRepository.kt),
-* The "pending coroutine run" SQL in [PendingCoroutineRunSql](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/structuredcooperation/PendingCoroutineRunSql.kt), and how
-  it's influenced by [EventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/eventloop/strategy/EventLoopStrategy.kt),
-* How `EventLoopStrategy` is implemented ([StandardEventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/eventloop/strategy/StandardEventLoopStrategy.kt), ignore
-  [SleepEventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/builder/Sleep.kt) for now) and how [HandlerRegistry](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/messaging/HandlerRegistry.kt)
+* The "start continuations" SQL in [MessageEventRepository](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/structuredcooperation/MessageEventRepository.kt),
+* The "pending coroutine run" SQL in [PendingCoroutineRunSql](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/structuredcooperation/PendingCoroutineRunSql.kt), and how
+  it's influenced by [EventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/EventLoopStrategy.kt),
+* How `EventLoopStrategy` is implemented ([StandardEventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/StandardEventLoopStrategy.kt), ignore
+  [SleepEventLoopStrategy](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/Sleep.kt) for now) and how [HandlerRegistry](src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/HandlerRegistry.kt)
   provides a placeholder solution of the ["who is listening" problem](https://developer.porn/posts/implementing-structured-cooperation/#building-and-maintaining-a-handler-topology) in Scoop.
 
 Finally, learn about individual functionalities:
-* cancellation requests (search for `CANCELLATION_REQUESTED`. Don't confuse this with [cancellation tokens](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/context/CancellationToken.kt) bellow),
-* [cooperation context](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/context/CooperationContext.kt),
-* [sleeping and scheduled steps](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/builder/Sleep.kt)
-* [cancellation tokens](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/context/CancellationToken.kt) and [deadlines](),
-* [try-finally](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/builder/TryFinally.kt)
+* cancellation requests (search for `CANCELLATION_REQUESTED`. Don't confuse this with [cancellation tokens](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CancellationToken.kt) bellow),
+* [cooperation context](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CooperationContext.kt),
+* [sleeping and scheduled steps](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/Sleep.kt)
+* [cancellation tokens](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CancellationToken.kt) and [deadlines](),
+* [try-finally](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/TryFinally.kt)
 
 As always, AI is your friend here. However, I've gotten mixed results when I ask it questions about structured cooperation directly, so I think a better approach is to
 ask questions such as "What files should I look at if I'm interested in understanding X."
@@ -180,8 +184,8 @@ emergent, and not fundamental primitives. It also implements its own
 between different steps of a handler, or even across parent-child handlers. It is the equivalent of reactive context in reactive pipelines or `CoroutineContext`in
 Kotlin coroutines.
 
-Scoop is implemented in two flavors, imperative and reactive. As you would expect, the latter is significantly more complicated, but including it should give
-you everything you need to translate the principles of structured cooperation to pretty much any environment without needing to invest significant mental effort.
+Scoop is implemented using a blocking (imperative) approach. If you're interested in the reactive version, it is available in
+[the first commit](https://github.com/gabrielshanahan/scoop/tree/aa775f8) of this repository.
 
 ### Data model
 From a data perspective, Scoop consists of two tables: `message` and `message_events`.
@@ -284,8 +288,8 @@ new messages being published to the topic, two, a periodic process is started th
 
 In the simplest case, a coroutine can be resumed if the structured cooperation rule mentioned above holds, i.e., all handlers of all messages emitted in the previous step
 (if any) have finished. Things get a little more complicated when you add errors, cancellations, and timeouts to the mix, but essentially this is still what happens. All this
-is done by [a moderately large piece of SQL](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/structuredcooperation/PendingCoroutineRunSql.kt), into which the
-outputs of [`EventLoopStrategy`](src/main/kotlin/io/github/gabrielshanahan/scoop/shared/coroutine/eventloop/strategy/EventLoopStrategy.kt) are spliced. The purpose of
+is done by [a moderately large piece of SQL](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/structuredcooperation/PendingCoroutineRunSql.kt), into which the
+outputs of [`EventLoopStrategy`](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/eventloop/strategy/EventLoopStrategy.kt) are spliced. The purpose of
 `EventLoopStrategy` is explained in the articles above. 
 
 When a coroutine is ready to be resumed, its state (e.g., what step was last executed, if it resulted in a failure or not, if any messages emitted in the last step
@@ -301,7 +305,7 @@ The component responsible for doing this process (fetching the state of a corout
 and the name of this process is a `tick` - i.e., a `tick` is doing all that, for a single coroutine.
 
 Here's a simplified version of the above, which is pretty much what you will find in the actual code (see 
-[EventLoop](src/main/kotlin/io/github/gabrielshanahan/scoop/blocking/coroutine/EventLoop.kt))
+[EventLoop](src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/EventLoop.kt))
 
 ```kotlin
 class EventLoop {

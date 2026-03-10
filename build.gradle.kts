@@ -1,10 +1,10 @@
 plugins {
-    java
-    id("org.jetbrains.kotlin.jvm")
-    id("org.jetbrains.kotlin.plugin.allopen")
-    id("io.quarkus")
-    id("com.ncorti.ktfmt.gradle") version "0.22.0"
-    id("io.gitlab.arturbosch.detekt") version "1.23.8"
+    `java-library`
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.allopen)
+    alias(libs.plugins.quarkus)
+    alias(libs.plugins.ktfmt)
+    alias(libs.plugins.detekt)
 }
 
 repositories {
@@ -12,29 +12,20 @@ repositories {
     mavenLocal()
 }
 
-val quarkusPlatformGroupId: String by project
-val quarkusPlatformArtifactId: String by project
-val quarkusPlatformVersion: String by project
-
 dependencies {
-    implementation(
-        enforcedPlatform(
-            "${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}"
-        )
-    )
-    implementation("io.quarkus:quarkus-rest")
-    implementation("io.quarkus:quarkus-flyway")
-    implementation("io.quarkus:quarkus-rest-jackson")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-    implementation("io.quarkus:quarkus-jdbc-postgresql")
-    implementation("io.quarkiverse.fluentjdbc:quarkus-fluentjdbc:1.0.0")
-    implementation("io.quarkus:quarkus-reactive-pg-client")
-    implementation("io.quarkus:quarkus-arc")
-    implementation("io.quarkus:quarkus-kotlin")
-    implementation("org.jetbrains.kotlin:kotlin-stdlib")
-    implementation("com.github.f4b6a3:uuid-creator:6.1.0")
-    testImplementation("io.quarkus:quarkus-junit5")
-    testImplementation("io.rest-assured:rest-assured")
+    implementation(enforcedPlatform(libs.quarkus.bom))
+    implementation(libs.quarkus.rest)
+    implementation(libs.quarkus.flyway)
+    implementation(libs.quarkus.rest.jackson)
+    implementation(libs.jackson.module.kotlin)
+    api(libs.quarkus.jdbc.postgresql)
+    api(libs.quarkus.fluentjdbc)
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.arc)
+    implementation(libs.quarkus.kotlin)
+    implementation(libs.uuid.creator)
+    testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.rest.assured)
 }
 
 group = "io.github.gabrielshanahan"
@@ -76,7 +67,12 @@ detekt {
     baseline = file("$projectDir/config/detekt/baseline.xml")
 }
 
+tasks.withType<io.gitlab.arturbosch.detekt.DetektCreateBaselineTask>().configureEach {
+    jvmTarget = "21"
+}
+
 tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    jvmTarget = "21"
     reports {
         html.required.set(true)
         xml.required.set(false)
