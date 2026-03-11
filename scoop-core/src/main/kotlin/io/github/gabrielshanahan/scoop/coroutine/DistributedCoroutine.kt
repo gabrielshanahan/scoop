@@ -1,7 +1,44 @@
 package io.github.gabrielshanahan.scoop.coroutine
 
+import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.strategy.EventLoopStrategy
 import io.github.gabrielshanahan.scoop.messaging.Message
+
+/** Context key for tracking loop repeat state between event loop ticks. */
+data object LoopStateKey : CooperationContext.MappedKey<LoopStateElement>()
+
+/**
+ * Context element that records whether the last step invocation returned [StepResult.Repeat]. This
+ * is consumed by
+ * [HappyPathContinuation][io.github.gabrielshanahan.scoop.coroutine.continuation.HappyPathContinuation]
+ * to decide whether to re-execute the same step.
+ */
+data class LoopStateElement(val shouldRepeat: Boolean) :
+    CooperationContext.MappedElement(LoopStateKey)
+
+/**
+ * Result returned by [TransactionalStep.invoke] to control loop execution.
+ * - [Continue]: The step completed normally; the saga advances to the next step.
+ * - [Repeat]: The step should be re-executed with an incremented iteration counter.
+ */
+sealed interface StepResult {
+    data object Continue : StepResult
+
+    data object Repeat : StepResult
+}
+
+/**
+ * Context passed to [TransactionalStep.rollback] to distinguish whether the rollback is happening
+ * for the step's own invocation or for a child-failure-handler run.
+ * - [NotChildFailureHandler]: Normal rollback of the step's own invocation.
+ * - [ChildFailureHandlerRun]: Rollback of emissions made during a specific
+ *   [handleChildFailures][TransactionalStep.handleChildFailures] invocation.
+ */
+sealed interface ChildFailureContext {
+    data object NotChildFailureHandler : ChildFailureContext
+
+    data class ChildFailureHandlerRun(val iteration: Int) : ChildFailureContext
+}
 
 /**
  * Represents a single step in a distributed saga, which is represented as a [DistributedCoroutine].
@@ -71,8 +108,10 @@ interface TransactionalStep {
      * @param scope The cooperation scope, providing access to message emission and context
      * @param message The message that triggered this saga (for the first step) or that caused this
      *   step to resume
+     * @param iteration The current loop iteration (0 for non-looping steps)
+     * @return [StepResult] indicating whether to continue to the next step or repeat this step
      */
-    fun invoke(scope: CooperationScope, message: Message)
+    fun invoke(scope: CooperationScope, message: Message, iteration: Int): StepResult
 
     /**
      * Defines the compensating action for this step during rollback.
@@ -86,8 +125,17 @@ interface TransactionalStep {
      * @param scope The cooperation scope (same as during [invoke])
      * @param message The original message that triggered this step
      * @param throwable The exception that caused the rollback to begin
+     * @param iteration The iteration of the step being rolled back
+     * @param childFailureContext Whether this rollback is for the step itself or for a
+     *   child-failure-handler run
      */
-    fun rollback(scope: CooperationScope, message: Message, throwable: Throwable) = Unit
+    fun rollback(
+        scope: CooperationScope,
+        message: Message,
+        throwable: Throwable,
+        iteration: Int,
+        childFailureContext: ChildFailureContext,
+    ) = Unit
 
     /**
      * Handles failures from child message handlers spawned by this step.
@@ -114,18 +162,20 @@ interface TransactionalStep {
      *
      * The default implementation re-throws the exception, causing the saga to enter rollback mode.
      *
-     * **Future improvement**: A cleaner approach would be to have a separate rollback step for
-     * anything emitted from [handleChildFailures], but this would require supporting a dynamic
-     * number "semi-steps" between each step (has [handleChildFailures] can run multiple times),
-     * which is definitely doable, but out of scope for a rudimentary POC.
-     *
      * @param scope The cooperation scope
      * @param message The original message that triggered this step
      * @param throwable The exception from the child handler that failed
+     * @param iteration The current iteration of the parent step
+     * @param childFailureHandlerIteration The iteration counter for this handler invocation
      * @throws Throwable If the error should cause this saga to roll back
      */
-    fun handleChildFailures(scope: CooperationScope, message: Message, throwable: Throwable): Unit =
-        throw throwable
+    fun handleChildFailures(
+        scope: CooperationScope,
+        message: Message,
+        throwable: Throwable,
+        iteration: Int,
+        childFailureHandlerIteration: Int,
+    ): Unit = throw throwable
 }
 
 /**

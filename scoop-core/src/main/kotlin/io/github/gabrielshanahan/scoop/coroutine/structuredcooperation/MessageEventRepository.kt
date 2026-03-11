@@ -1,6 +1,7 @@
 package io.github.gabrielshanahan.scoop.coroutine.structuredcooperation
 
 import io.github.gabrielshanahan.scoop.JsonbHelper
+import io.github.gabrielshanahan.scoop.coroutine.StepInstance
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
 import io.github.gabrielshanahan.scoop.coroutine.context.isNotEmpty
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.strategy.EventLoopStrategy
@@ -67,6 +68,7 @@ class MessageEventRepository(
      * @param cooperationLineage Extended cooperation lineage for child handlers
      * @param context Optional cooperation context to propagate to child handlers
      */
+    @Suppress("LongParameterList")
     fun insertScopedEmittedEvent(
         connection: Connection,
         messageId: UUID,
@@ -75,13 +77,15 @@ class MessageEventRepository(
         stepName: String?,
         cooperationLineage: List<UUID>,
         context: CooperationContext?,
+        iteration: Int = 0,
+        childFailureHandlerIteration: Int? = null,
     ) {
         fluentJdbc
             .queryOn(connection)
             .update(
                 """
-                INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, context) 
-                VALUES (:messageId, 'EMITTED', :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :context)
+                INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, context, iteration, child_failure_handler_iteration)
+                VALUES (:messageId, 'EMITTED', :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :context, :iteration, :childFailureHandlerIteration)
                 """
                     .trimIndent()
             )
@@ -97,6 +101,8 @@ class MessageEventRepository(
                 "context",
                 context?.takeIf { it.isNotEmpty() }?.let { jsonbHelper.toPGobject(it) },
             )
+            .namedParam("iteration", iteration)
+            .namedParam("childFailureHandlerIteration", childFailureHandlerIteration)
             .run()
     }
 
@@ -265,6 +271,7 @@ class MessageEventRepository(
             .run()
     }
 
+    @Suppress("LongParameterList")
     fun insertMessageEvent(
         connection: Connection,
         messageId: UUID,
@@ -275,13 +282,15 @@ class MessageEventRepository(
         cooperationLineage: List<UUID>,
         exception: CooperationFailure?,
         context: CooperationContext?,
+        iteration: Int = 0,
+        childFailureHandlerIteration: Int? = null,
     ) {
         fluentJdbc
             .queryOn(connection)
             .update(
                 """
-                INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, exception, context) 
-                VALUES (:messageId, :messageEventType::message_event_type, :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :exception, :context)
+                INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, exception, context, iteration, child_failure_handler_iteration)
+                VALUES (:messageId, :messageEventType::message_event_type, :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :exception, :context, :iteration, :childFailureHandlerIteration)
                 """
                     .trimIndent()
             )
@@ -299,6 +308,8 @@ class MessageEventRepository(
                 "context",
                 context?.takeIf { it.isNotEmpty() }?.let { jsonbHelper.toPGobject(it) },
             )
+            .namedParam("iteration", iteration)
+            .namedParam("childFailureHandlerIteration", childFailureHandlerIteration)
             .run()
     }
 
@@ -313,6 +324,7 @@ class MessageEventRepository(
      * This method is called during rollback continuation execution via
      * [ScopeCapabilities.emitRollbacksForEmissions].
      */
+    @Suppress("LongParameterList")
     fun insertRollbackEmittedEventsForStep(
         connection: Connection,
         stepName: String,
@@ -322,6 +334,8 @@ class MessageEventRepository(
         scopeStepName: String?,
         exception: CooperationFailure,
         context: CooperationContext?,
+        iteration: Int = 0,
+        childFailureHandlerIteration: Int? = null,
     ) {
         val lineageArray = connection.createArrayOf("uuid", cooperationLineage.toTypedArray())
 
@@ -335,14 +349,16 @@ class MessageEventRepository(
                     WHERE type = 'EMITTED'
                         AND step = :stepName
                         AND cooperation_lineage = :cooperationLineage
+                        AND iteration = :iteration
+                        AND child_failure_handler_iteration IS NOT DISTINCT FROM CAST(:childFailureHandlerIteration AS INT)
                 )
                 INSERT INTO message_event (
-                    message_id, type, 
+                    message_id, type,
                     cooperation_lineage, coroutine_name, coroutine_identifier, step,
                     exception, context
                 )
-                SELECT 
-                    message_id, 'ROLLBACK_EMITTED', 
+                SELECT
+                    message_id, 'ROLLBACK_EMITTED',
                     :cooperationLineage, :coroutineName, :coroutineIdentifier, :scopeStepName, :exception, :context
                 FROM emitted_record
                 """
@@ -358,6 +374,8 @@ class MessageEventRepository(
                 "context",
                 context?.takeIf { it.isNotEmpty() }?.let { jsonbHelper.toPGobject(it) },
             )
+            .namedParam("iteration", iteration)
+            .namedParam("childFailureHandlerIteration", childFailureHandlerIteration)
             .run()
     }
 
@@ -475,7 +493,7 @@ class MessageEventRepository(
                 WITH
                 -- Find EMITTED records missing a SEEN
                 emitted_missing_seen AS (
-                    SELECT emitted.message_id, emitted.cooperation_lineage, emitted.context, emitted.step
+                    SELECT emitted.message_id, emitted.cooperation_lineage, emitted.context, emitted.step, emitted.iteration, emitted.child_failure_handler_iteration
                     FROM message_event emitted
                     LEFT JOIN message_event AS coroutine_seen
                         ON coroutine_seen.message_id = emitted.message_id AND coroutine_seen.type = 'SEEN' AND coroutine_seen.coroutine_name = :coroutine_name
@@ -495,24 +513,26 @@ class MessageEventRepository(
                         FOR UPDATE SKIP LOCKED
                     ) parent_seen_lock_attempt ON parent_seen_exists.id IS NOT NULL
                     LEFT JOIN LATERAL (
-                        -- Get the last event in parent sequence along with its type and step
-                        SELECT type, step
+                        -- Get the last event in parent sequence along with its type, step, and iteration info
+                        SELECT type, step, iteration, child_failure_handler_iteration
                         FROM message_event last_event
                         WHERE last_event.cooperation_lineage = parent_seen_exists.cooperation_lineage
                         ORDER BY last_event.created_at DESC
                         LIMIT 1
                     ) last_parent_event ON parent_seen_exists.id IS NOT NULL
-                    WHERE emitted.type = 'EMITTED' 
+                    WHERE emitted.type = 'EMITTED'
                         AND coroutine_seen.id IS NULL
                         AND (
                             -- Either no SEEN record exists (i.e., this is a toplevel emission, and there's nothing to lock)
                             parent_seen_exists.id IS NULL
-                            -- OR the SEEN record exists AND we successfully locked it AND the parent sequence's last event is SUSPENDED with matching step
+                            -- OR the SEEN record exists AND we successfully locked it AND the parent sequence's last event is SUSPENDED with matching step+iteration+cfhi
                             OR (
-                                parent_seen_exists.id IS NOT NULL 
+                                parent_seen_exists.id IS NOT NULL
                                 AND parent_seen_lock_attempt.locked IS NOT NULL
                                 AND last_parent_event.type = 'SUSPENDED'
                                 AND last_parent_event.step = emitted.step
+                                AND last_parent_event.iteration = emitted.iteration
+                                AND last_parent_event.child_failure_handler_iteration IS NOT DISTINCT FROM emitted.child_failure_handler_iteration
                             )
                         )
                         -- EventLoopStrategy says we're good to go
@@ -639,6 +659,8 @@ class MessageEventRepository(
         val payload: PGobject,
         val createdAt: OffsetDateTime,
         val step: String?,
+        val iteration: Int?,
+        val childFailureHandlerIteration: Int?,
         val latestScopeContext: PGobject?,
         val latestContext: PGobject?,
         val childRolledBackExceptions: PGobject,
@@ -729,6 +751,9 @@ class MessageEventRepository(
                             @Suppress("UNCHECKED_CAST")
                             (it.getArray("cooperation_lineage").array as Array<UUID>).toList(),
                         step = it.getString("step"),
+                        iteration = it.getObject("iteration") as Int?,
+                        childFailureHandlerIteration =
+                            it.getObject("child_failure_handler_iteration") as Int?,
                         latestScopeContext = it.getObject("latest_scope_context") as PGobject?,
                         latestContext = it.getObject("latest_context") as PGobject?,
                         childRolledBackExceptions =
@@ -743,4 +768,50 @@ class MessageEventRepository(
                 .orElse(null)
         }
     }
+
+    /**
+     * Fetches all distinct step instances that have been executed for a given cooperation lineage,
+     * ordered by their first execution time (most recent first).
+     *
+     * This is used during rollback to determine which step+iteration+cfhi combinations need to be
+     * rolled back, in reverse execution order.
+     *
+     * @param connection Database connection
+     * @param cooperationLineage The cooperation lineage to query
+     * @return List of step instances in reverse execution order
+     */
+    fun fetchExecutedStepInstances(
+        connection: Connection,
+        cooperationLineage: List<UUID>,
+    ): List<StepInstance> =
+        fluentJdbc
+            .queryOn(connection)
+            .select(
+                """
+                SELECT step, iteration, child_failure_handler_iteration
+                FROM (
+                    SELECT DISTINCT ON (step, iteration, child_failure_handler_iteration)
+                        step, iteration, child_failure_handler_iteration, created_at
+                    FROM message_event
+                    WHERE cooperation_lineage = :cooperationLineage
+                      AND type IN ('SUSPENDED', 'EMITTED')
+                      AND step IS NOT NULL
+                    ORDER BY step, iteration, child_failure_handler_iteration, created_at
+                ) sub
+                ORDER BY created_at DESC
+                """
+                    .trimIndent()
+            )
+            .namedParam(
+                "cooperationLineage",
+                connection.createArrayOf("uuid", cooperationLineage.toTypedArray()),
+            )
+            .listResult {
+                StepInstance(
+                    step = it.getString("step"),
+                    iteration = it.getInt("iteration"),
+                    childFailureHandlerIteration =
+                        it.getObject("child_failure_handler_iteration") as Int?,
+                )
+            }
 }

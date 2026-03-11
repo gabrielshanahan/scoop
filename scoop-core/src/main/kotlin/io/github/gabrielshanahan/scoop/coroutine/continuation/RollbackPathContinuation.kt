@@ -1,9 +1,12 @@
 package io.github.gabrielshanahan.scoop.coroutine.continuation
 
+import io.github.gabrielshanahan.scoop.coroutine.ChildFailureContext
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScope
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.CoroutineState
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
+import io.github.gabrielshanahan.scoop.coroutine.StepInstance
+import io.github.gabrielshanahan.scoop.coroutine.StepResult
 import io.github.gabrielshanahan.scoop.coroutine.TransactionalStep
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.LastSuspendedStep
@@ -73,6 +76,7 @@ import java.sql.Connection
 const val ROLLING_BACK_PREFIX = "Rollback of "
 const val ROLLING_BACK_CHILD_SCOPES_STEP_SUFFIX = " (rolling back child scopes)"
 
+@Suppress("LongParameterList")
 internal class RollbackPathContinuation(
     connection: Connection,
     context: CooperationContext,
@@ -80,6 +84,8 @@ internal class RollbackPathContinuation(
     suspensionPoint: SuspensionPoint,
     distributedCoroutine: DistributedCoroutine,
     scopeCapabilities: ScopeCapabilities,
+    initialIteration: Int = 0,
+    initialCfhi: Int? = null,
 ) :
     BaseCooperationContinuation(
         connection,
@@ -88,6 +94,8 @@ internal class RollbackPathContinuation(
         suspensionPoint,
         distributedCoroutine,
         scopeCapabilities,
+        currentIteration = initialIteration,
+        currentCfhi = initialCfhi,
     ) {
     override fun giveUpStrategy(seen: String): String =
         distributedCoroutine.eventLoopStrategy.giveUpOnRollbackPath(seen)
@@ -161,22 +169,56 @@ internal fun DistributedCoroutine.buildRollbackPathContinuation(
         suffix
     }
 
-    // Phase 2: Transform original steps into rollback sub-steps
-    // Each original step becomes 2 rollback sub-steps (child rollback + self rollback)
-    val rollbackSteps = buildRollbackSteps(rollingBackPrefix, rollingBackSuffix, scopeCapabilities)
+    // Phase 2: Filter out rollback step names from executed instances (only keep original steps)
+    val originalInstances =
+        coroutineState.executedStepInstances.filter { instance ->
+            !instance.step.startsWith(rollingBackPrefix)
+        }
 
-    // Phase 3: Determine where to start continuation based on current saga state
+    // Phase 3: Transform executed step instances into rollback sub-steps
+    // Each executed instance becomes 2 rollback sub-steps (child rollback + self rollback)
+    val rollbackSteps =
+        buildRollbackSteps(
+            rollingBackPrefix,
+            rollingBackSuffix,
+            scopeCapabilities,
+            originalInstances,
+        )
+
+    // Helper: create a sentinel rollback step with the proper rollback name for immediate
+    // completion. Used when no executed instances exist (step threw before committing or
+    // handler never started its first step).
+    fun createSentinelRollbackStep(
+        stepName: String,
+        iteration: Int,
+        cfhi: Int?,
+    ): TransactionalStep {
+        val syntheticRollbackSteps =
+            buildRollbackSteps(
+                rollingBackPrefix,
+                rollingBackSuffix,
+                scopeCapabilities,
+                listOf(StepInstance(stepName, iteration, cfhi)),
+            )
+        return if (syntheticRollbackSteps.isNotEmpty()) {
+            syntheticRollbackSteps.last()
+        } else {
+            steps.first()
+        }
+    }
+
+    // Phase 4: Determine where to start continuation based on current saga state
     return when (coroutineState.lastSuspendedStep) {
         is LastSuspendedStep.NotSuspendedYet -> {
             // Case 1: Rollback before any step committed to database
-            // Since no transaction was committed, no messages were emitted, no child handlers
-            // were spawned, and there's nothing to roll back. Position after the last rollback
-            // step so the continuation immediately completes the saga.
+            // Nothing to roll back - position after the last step so continuation completes.
+            // Use a synthetic rollback step so ROLLED_BACK event records the proper name.
+            val sentinel = createSentinelRollbackStep(steps.first().name, 0, null)
             RollbackPathContinuation(
                 connection,
                 coroutineState.cooperationContext,
                 coroutineState.scopeIdentifier,
-                SuspensionPoint.AfterLastStep(rollbackSteps.first()),
+                SuspensionPoint.AfterLastStep(sentinel),
                 this,
                 scopeCapabilities,
             )
@@ -184,86 +226,63 @@ internal fun DistributedCoroutine.buildRollbackPathContinuation(
 
         is LastSuspendedStep.SuspendedAfter -> {
             // Case 2: Rollback after one or more steps executed and committed
+            val lastStepName = coroutineState.lastSuspendedStep.stepName
+            val hasRollbackPrefix = lastStepName.startsWith(rollingBackPrefix)
 
-            // Extract the original step name by removing any rollback prefixes/suffixes
-            // E.g., "Rollback of PaymentStep (rolling back child scopes)" → "PaymentStep"
-            val cleanLastSuspendedStepName =
-                coroutineState.lastSuspendedStep.stepName
-                    .removePrefix(rollingBackPrefix)
-                    .removeSuffix(rollingBackSuffix)
-
-            // Find the index of the original step in the saga definition
-            val stepToRevert = steps.indexOfFirst { it.name == cleanLastSuspendedStepName }
-
-            check(stepToRevert > -1) { "Step $cleanLastSuspendedStepName was not found" }
-
-            // Determine if rollback just started vs. rollback already in progress
-            // Key insight: If the clean name equals the original name, then the suspended step
-            // has no rollback prefix/suffix, meaning we're transitioning from normal execution
-            // to rollback execution for the first time.
-            // This could be determined directly in the "fetchCoroutineState" SQL by evaluating
-            // "is ROLLING_BACK the last event that was written", but this works as well.
-            if (cleanLastSuspendedStepName == coroutineState.lastSuspendedStep.stepName) {
-                // Sub-case 2a: Rollback just started (normal step name, no rollback prefix/suffix)
-                // Need to start rollback for the failed step. Each original step becomes 2 rollback
-                // sub-steps, so we use the following formula to find the "child rollback" sub-step.
-                // Formula: For original step at index N, the "child rollback" sub-step is at index
-                // 2*N+1
-                // Example:
-                // Original steps: ["step A", "step B", "step C"]
-                // Original indices: [0, 1, 2]
-                // Rollback steps: ["Rollback of step A (rolling back child scopes)", "Rollback of
-                // step A",
-                //                  "Rollback of step B (rolling back child scopes)", "Rollback of
-                // step B",
-                //                  "Rollback of step C (rolling back child scopes)", "Rollback of
-                // step C"]
-                // Rollback indices: [0, 1, 2, 3, 4, 5]
-                //
-                // If step C (index 2) failed, we want to start with "Rollback of step C (rolling
-                // back child scopes)"
-                // Formula: 2 * 2 + 1 = 5, which gives us rollbackSteps[5] = "Rollback of step C
-                // (rolling back child scopes)"
-                val nextStepIdx = 2 * stepToRevert + 1
+            if (rollbackSteps.isEmpty()) {
+                // No executed instances to roll back (step threw before committing).
+                // Use a synthetic rollback step so ROLLED_BACK event records the proper name.
+                val lastSuspended = coroutineState.lastSuspendedStep
+                val sentinel =
+                    createSentinelRollbackStep(
+                        lastSuspended.stepName,
+                        lastSuspended.iteration,
+                        lastSuspended.childFailureHandlerIteration,
+                    )
                 RollbackPathContinuation(
                     connection,
                     coroutineState.cooperationContext,
                     coroutineState.scopeIdentifier,
-                    SuspensionPoint.BeforeFirstStep(rollbackSteps[nextStepIdx]),
+                    SuspensionPoint.AfterLastStep(sentinel),
+                    this,
+                    scopeCapabilities,
+                )
+            } else if (!hasRollbackPrefix) {
+                // Sub-case 2a: Rollback just started (normal step name)
+                // Start with the first rollback sub-step (child rollback of last executed instance)
+                RollbackPathContinuation(
+                    connection,
+                    coroutineState.cooperationContext,
+                    coroutineState.scopeIdentifier,
+                    SuspensionPoint.BeforeFirstStep(rollbackSteps.first()),
                     this,
                     scopeCapabilities,
                 )
             } else {
-                // Sub-case 2b: Rollback already in progress (step name has rollback prefix/suffix)
-                // Find the current rollback sub-step in the rollback sequence
-                val nextStepIdx =
-                    rollbackSteps.indexOfFirst {
-                        it.name == coroutineState.lastSuspendedStep.stepName
-                    }
+                // Sub-case 2b: Rollback already in progress
+                val nextStepIdx = rollbackSteps.indexOfFirst { it.name == lastStepName }
 
-                if (rollbackSteps[nextStepIdx] == rollbackSteps.first()) {
-                    // We're on the first (i.e., last in rollback execution order) step - rollback
-                    // is completing
-                    // Position after the last rollback step so the continuation completes the saga
+                check(nextStepIdx > -1) { "Rollback step $lastStepName was not found" }
+
+                if (nextStepIdx == rollbackSteps.lastIndex) {
+                    // We're on the last rollback sub-step - rollback is completing
                     RollbackPathContinuation(
                         connection,
                         coroutineState.cooperationContext,
                         coroutineState.scopeIdentifier,
-                        SuspensionPoint.AfterLastStep(rollbackSteps.first()),
+                        SuspensionPoint.AfterLastStep(rollbackSteps.last()),
                         this,
                         scopeCapabilities,
                     )
                 } else {
-                    // Rollback continues - move to the next rollback sub-step in the sequence
-                    // Note: rollbackSteps are in reverse execution order, so we subtract 1 to get
-                    // "next"
+                    // Rollback continues - move to the next rollback sub-step
                     RollbackPathContinuation(
                         connection,
                         coroutineState.cooperationContext,
                         coroutineState.scopeIdentifier,
                         SuspensionPoint.BetweenSteps(
                             rollbackSteps[nextStepIdx],
-                            rollbackSteps[nextStepIdx - 1],
+                            rollbackSteps[nextStepIdx + 1],
                         ),
                         this,
                         scopeCapabilities,
@@ -275,72 +294,137 @@ internal fun DistributedCoroutine.buildRollbackPathContinuation(
 }
 
 /**
- * Transforms the original saga steps into rollback sub-steps for two-phase rollback execution. Each
- * original step becomes two rollback sub-steps that execute in reverse order to ensure child-first
- * rollback semantics.
+ * Transforms executed step instances into rollback sub-steps for two-phase rollback execution. Each
+ * executed instance becomes two rollback sub-steps that execute in reverse order to ensure
+ * child-first rollback semantics.
  *
  * ## Transformation Logic
  *
- * For each original step, creates two rollback sub-steps:
- * 1. **Self Rollback Step**: `"<prefix>StepName"`
- *     - Executes the original step's [TransactionalStep.rollback] method
- * 2. **Child Rollback Step**: `"<prefix>StepName<suffix>"`
- *     - Emits rollback messages to all child handlers via
+ * For each executed step instance `(stepName, iteration, cfhi)`, creates two rollback sub-steps:
+ * 1. **Self Rollback Step**: `"<prefix>StepName[iteration,cfhi]"`
+ *     - Executes the original step's [TransactionalStep.rollback] method with the correct iteration
+ *       and [ChildFailureContext]
+ * 2. **Child Rollback Step**: `"<prefix>StepName[iteration,cfhi]<suffix>"`
+ *     - Emits rollback messages to all child handlers spawned by this specific instance via
  *       [ScopeCapabilities.emitRollbacksForEmissions]
  *
- * The caller ensures that these are called in reverse order, so that each step's children roll back
- * before the step itself rolls back.
+ * The instances are already in reverse execution order, so children roll back before parents.
  *
  * @param rollingBackPrefix Unique prefix for rollback step names (e.g., "Rollback of ")
  * @param rollingBackSuffix Unique suffix for child rollback steps (e.g., " (rolling back child
  *   scopes)")
  * @param scopeCapabilities Provides the [ScopeCapabilities.emitRollbacksForEmissions] functionality
- * @return List of rollback sub-steps in reverse execution order (last step's sub-steps first)
+ * @param executedInstances List of step instances in reverse execution order
+ * @return List of rollback sub-steps in reverse execution order
  */
 private fun DistributedCoroutine.buildRollbackSteps(
     rollingBackPrefix: String,
     rollingBackSuffix: String,
     scopeCapabilities: ScopeCapabilities,
+    executedInstances: List<StepInstance>,
 ): List<TransactionalStep> =
-    steps.flatMap { step ->
-        listOf(
+    executedInstances.flatMap { instance ->
+        val step = steps.first { it.name == instance.step }
+        val instanceSuffix =
+            "[${instance.iteration},${instance.childFailureHandlerIteration ?: ""}]"
+        val childFailureContext =
+            if (instance.childFailureHandlerIteration != null) {
+                ChildFailureContext.ChildFailureHandlerRun(instance.childFailureHandlerIteration)
+            } else {
+                ChildFailureContext.NotChildFailureHandler
+            }
+
+        val childRollbackStep =
+            // Child rollback step: emits rollback messages to children of this instance
             object : TransactionalStep {
                 override val name: String
-                    get() = rollingBackPrefix + step.name
+                    get() = rollingBackPrefix + step.name + instanceSuffix + rollingBackSuffix
 
-                override fun invoke(scope: CooperationScope, message: Message) =
-                    step.invoke(scope, message)
+                override fun invoke(
+                    scope: CooperationScope,
+                    message: Message,
+                    iteration: Int,
+                ): StepResult = error("Should never be invoked")
 
                 override fun rollback(
                     scope: CooperationScope,
                     message: Message,
                     throwable: Throwable,
-                ) = step.rollback(scope, message, throwable)
+                    iteration: Int,
+                    childFailureCtx: ChildFailureContext,
+                ) =
+                    scopeCapabilities.emitRollbacksForEmissions(
+                        scope,
+                        step.name,
+                        instance.iteration,
+                        instance.childFailureHandlerIteration,
+                        throwable,
+                    )
 
                 override fun handleChildFailures(
                     scope: CooperationScope,
                     message: Message,
                     throwable: Throwable,
-                ) = step.handleChildFailures(scope, message, throwable)
-            },
-            object : TransactionalStep {
-                override val name: String
-                    get() = rollingBackPrefix + step.name + rollingBackSuffix
+                    iteration: Int,
+                    childFailureHandlerIteration: Int,
+                ) =
+                    step.handleChildFailures(
+                        scope,
+                        message,
+                        throwable,
+                        iteration,
+                        childFailureHandlerIteration,
+                    )
+            }
 
-                override fun invoke(scope: CooperationScope, message: Message) =
-                    error("Should never be invoked")
+        // Only create a self-rollback step for the original invocation (cfhi == null).
+        // handleChildFailures runs (cfhi != null) only need their children rolled back,
+        // not the step itself rolled back again.
+        if (instance.childFailureHandlerIteration != null) {
+            listOf(childRollbackStep)
+        } else {
+            val selfRollbackStep =
+                // Self rollback step: executes the original step's rollback method
+                object : TransactionalStep {
+                    override val name: String
+                        get() = rollingBackPrefix + step.name + instanceSuffix
 
-                override fun rollback(
-                    scope: CooperationScope,
-                    message: Message,
-                    throwable: Throwable,
-                ) = scopeCapabilities.emitRollbacksForEmissions(scope, step.name, throwable)
+                    override fun invoke(
+                        scope: CooperationScope,
+                        message: Message,
+                        iteration: Int,
+                    ): StepResult = step.invoke(scope, message, iteration)
 
-                override fun handleChildFailures(
-                    scope: CooperationScope,
-                    message: Message,
-                    throwable: Throwable,
-                ) = step.handleChildFailures(scope, message, throwable)
-            },
-        )
+                    override fun rollback(
+                        scope: CooperationScope,
+                        message: Message,
+                        throwable: Throwable,
+                        iteration: Int,
+                        childFailureCtx: ChildFailureContext,
+                    ) =
+                        step.rollback(
+                            scope,
+                            message,
+                            throwable,
+                            instance.iteration,
+                            childFailureContext,
+                        )
+
+                    override fun handleChildFailures(
+                        scope: CooperationScope,
+                        message: Message,
+                        throwable: Throwable,
+                        iteration: Int,
+                        childFailureHandlerIteration: Int,
+                    ) =
+                        step.handleChildFailures(
+                            scope,
+                            message,
+                            throwable,
+                            iteration,
+                            childFailureHandlerIteration,
+                        )
+                }
+            listOf(childRollbackStep, selfRollbackStep)
+        }
     }

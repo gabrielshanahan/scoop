@@ -242,6 +242,7 @@ class EventLoop(
      *
      * This state is used to build the appropriate continuation for resuming execution.
      */
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun fetchSomePendingCoroutineState(
         connection: Connection,
         distributedCoroutine: DistributedCoroutine,
@@ -384,13 +385,30 @@ class EventLoop(
                     }
                 }
 
+            // For rollback, we need the actual execution history to know which
+            // (step, iteration, cfhi) tuples to roll back
+            val executedStepInstances =
+                if (rollbackState is RollbackState.Me.RollingBack) {
+                    messageEventRepository.fetchExecutedStepInstances(
+                        connection,
+                        result.cooperationLineage,
+                    )
+                } else {
+                    emptyList()
+                }
+
             return CoroutineState(
                 message,
 
                 // From latest_suspended.step (the last SUSPENDED event) null means this is a
                 // brand new saga that hasn't executed any steps yet
                 if (result.step == null) LastSuspendedStep.NotSuspendedYet
-                else LastSuspendedStep.SuspendedAfter(result.step),
+                else
+                    LastSuspendedStep.SuspendedAfter(
+                        result.step,
+                        result.iteration ?: 0,
+                        result.childFailureHandlerIteration,
+                    ),
 
                 // The cooperation lineage from the SEEN event for this saga. This lineage
                 // extends the parent's lineage and identifies this saga's position in the
@@ -404,6 +422,7 @@ class EventLoop(
                 // later
                 latestScopeContext + latestContext,
                 rollbackState,
+                executedStepInstances,
             )
         }
     }
@@ -591,9 +610,21 @@ class EventLoop(
             scope.scopeIdentifier.cooperationLineage,
             cooperationFailure,
             scope.context,
+            scope.continuation.continuationIdentifier.iteration,
+            scope.continuation.continuationIdentifier.childFailureHandlerIteration,
         )
     }
 }
+
+/**
+ * Represents a specific execution instance of a step, identified by name, iteration, and optional
+ * child-failure-handler iteration.
+ */
+data class StepInstance(
+    val step: String,
+    val iteration: Int,
+    val childFailureHandlerIteration: Int?,
+)
 
 /**
  * Represents the execution state of a saga at a specific point in time.
@@ -613,6 +644,8 @@ class EventLoop(
  * @param scopeIdentifier The cooperation scope this saga is running in
  * @param cooperationContext Shared context data (deadlines, cancellation tokens, custom data)
  * @param rollbackState Whether the saga is rolling back and what exceptions caused it
+ * @param executedStepInstances List of step instances that have been executed (for rollback
+ *   ordering)
  */
 data class CoroutineState(
     val message: Message,
@@ -620,4 +653,5 @@ data class CoroutineState(
     val scopeIdentifier: CooperationScopeIdentifier.Child,
     val cooperationContext: CooperationContext,
     val rollbackState: RollbackState,
+    val executedStepInstances: List<StepInstance> = emptyList(),
 )

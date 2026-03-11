@@ -1,8 +1,11 @@
 package io.github.gabrielshanahan.scoop.coroutine.continuation
 
+import io.github.gabrielshanahan.scoop.coroutine.ChildFailureContext
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScope
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
+import io.github.gabrielshanahan.scoop.coroutine.LoopStateElement
+import io.github.gabrielshanahan.scoop.coroutine.StepResult
 import io.github.gabrielshanahan.scoop.coroutine.TransactionalStep
 import io.github.gabrielshanahan.scoop.coroutine.VariableName
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
@@ -83,7 +86,7 @@ internal sealed interface SuspensionPoint {
  * @param scopeCapabilities Provides the implementations of capabilities exposed by
  *   [CooperationScope] that require interacting with the database
  */
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LongParameterList")
 internal abstract class BaseCooperationContinuation(
     override val connection: Connection,
     override var context: CooperationContext,
@@ -91,6 +94,8 @@ internal abstract class BaseCooperationContinuation(
     private val suspensionPoint: SuspensionPoint,
     protected val distributedCoroutine: DistributedCoroutine,
     private val scopeCapabilities: ScopeCapabilities,
+    private var currentIteration: Int = 0,
+    private var currentCfhi: Int? = null,
 ) : CooperationContinuation {
 
     /**
@@ -132,7 +137,13 @@ internal abstract class BaseCooperationContinuation(
     override val emittedMessages: MutableList<Message> = mutableListOf()
 
     override val continuationIdentifier: ContinuationIdentifier
-        get() = ContinuationIdentifier(currentStep.name, distributedCoroutine.identifier)
+        get() =
+            ContinuationIdentifier(
+                stepName = currentStep.name,
+                iteration = currentIteration,
+                childFailureHandlerIteration = currentCfhi,
+                distributedCoroutineIdentifier = distributedCoroutine.identifier,
+            )
 
     /**
      * Provides SQL that returns exception records when this continuation should give up and fail.
@@ -355,11 +366,15 @@ internal abstract class BaseCooperationContinuation(
     ): Continuation.ContinuationResult =
         when (lastStepResult) {
             is Continuation.LastStepResult.Failure -> {
+                // Track child failure handler iteration
+                currentCfhi = (currentCfhi ?: -1) + 1
                 // Child handlers failed - let the current step handle the failures
                 currentStep.handleChildFailures(
                     this,
                     lastStepResult.message,
                     lastStepResult.throwable,
+                    currentIteration,
+                    currentCfhi!!,
                 )
                 // Failure handling always suspends (may have emitted retry messages)
                 Continuation.ContinuationResult.Suspend(emittedMessages)
@@ -367,12 +382,23 @@ internal abstract class BaseCooperationContinuation(
 
             is Continuation.LastStepResult.SuccessfullyInvoked ->
                 // Previous execution succeeded - continue with normal forward execution
-                resume { currentStep.invoke(this, lastStepResult.message) }
+                resume { currentStep.invoke(this, lastStepResult.message, currentIteration) }
 
             is Continuation.LastStepResult.SuccessfullyRolledBack ->
                 // Previous rollback succeeded - continue with compensating action execution
                 resume {
-                    currentStep.rollback(this, lastStepResult.message, lastStepResult.throwable)
+                    currentStep.rollback(
+                        this,
+                        lastStepResult.message,
+                        lastStepResult.throwable,
+                        currentIteration,
+                        if (currentCfhi != null) {
+                            ChildFailureContext.ChildFailureHandlerRun(currentCfhi!!)
+                        } else {
+                            ChildFailureContext.NotChildFailureHandler
+                        },
+                    )
+                    StepResult.Continue
                 }
         }
 
@@ -382,13 +408,16 @@ internal abstract class BaseCooperationContinuation(
      * @param resumeStep Lambda containing the step execution logic ([TransactionalStep.invoke] or
      *   [TransactionalStep.rollback])
      */
-    private fun resume(resumeStep: () -> Unit): Continuation.ContinuationResult =
+    private fun resume(resumeStep: () -> StepResult): Continuation.ContinuationResult =
         if (suspensionPoint is SuspensionPoint.AfterLastStep) {
             // All steps completed - saga is done, don't execute the step
             Continuation.ContinuationResult.Success
         } else {
             // More steps remain - execute this step and suspend to wait for children
-            resumeStep()
+            val result = resumeStep()
+            if (result == StepResult.Repeat) {
+                context += LoopStateElement(shouldRepeat = true)
+            }
             Continuation.ContinuationResult.Suspend(emittedMessages)
         }
 }
