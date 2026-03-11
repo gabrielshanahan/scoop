@@ -3,6 +3,7 @@ package io.github.gabrielshanahan.scoop.coroutine.continuation
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.CoroutineState
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
+import io.github.gabrielshanahan.scoop.coroutine.LoopStateKey
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.LastSuspendedStep
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ScopeCapabilities
@@ -20,6 +21,7 @@ import java.sql.Connection
  * However, all this is done in the parent [BaseCooperationContinuation]. Here, we only specialize
  * the [giveUpStrategy], as that's all that's needed.
  */
+@Suppress("LongParameterList")
 internal class HappyPathContinuation(
     connection: Connection,
     context: CooperationContext,
@@ -27,6 +29,8 @@ internal class HappyPathContinuation(
     suspensionPoint: SuspensionPoint,
     distributedCoroutine: DistributedCoroutine,
     scopeCapabilities: ScopeCapabilities,
+    initialIteration: Int = 0,
+    initialCfhi: Int? = null,
 ) :
     BaseCooperationContinuation(
         connection,
@@ -35,6 +39,8 @@ internal class HappyPathContinuation(
         suspensionPoint,
         distributedCoroutine,
         scopeCapabilities,
+        currentIteration = initialIteration,
+        currentCfhi = initialCfhi,
     ) {
     override fun giveUpStrategy(seen: String): String =
         distributedCoroutine.eventLoopStrategy.giveUpOnHappyPath(seen)
@@ -77,29 +83,45 @@ internal fun DistributedCoroutine.buildHappyPathContinuation(
         }
 
         is LastSuspendedStep.SuspendedAfter -> {
-            val suspendedStepIdx =
-                steps.indexOfFirst { it.name == coroutineState.lastSuspendedStep.stepName }
+            val lastSuspended = coroutineState.lastSuspendedStep
+            val suspendedStepIdx = steps.indexOfFirst { it.name == lastSuspended.stepName }
 
-            check(suspendedStepIdx > -1) {
-                "Step ${coroutineState.lastSuspendedStep} was not found"
-            }
+            check(suspendedStepIdx > -1) { "Step $lastSuspended was not found" }
 
-            if (steps[suspendedStepIdx] == steps.last()) {
+            val shouldRepeat =
+                coroutineState.cooperationContext[LoopStateKey]?.shouldRepeat ?: false
+            val cleanContext = coroutineState.cooperationContext - LoopStateKey
+
+            if (shouldRepeat) {
+                // Loop: re-execute the same step with incremented iteration
+                HappyPathContinuation(
+                    connection,
+                    cleanContext,
+                    coroutineState.scopeIdentifier,
+                    SuspensionPoint.BeforeFirstStep(steps[suspendedStepIdx]),
+                    this,
+                    scopeCapabilities,
+                    initialIteration = lastSuspended.iteration + 1,
+                    initialCfhi = null,
+                )
+            } else if (steps[suspendedStepIdx] == steps.last()) {
                 // Case 2: Suspended after last step - Create a continuation that will complete the
                 // saga
                 HappyPathContinuation(
                     connection,
-                    coroutineState.cooperationContext,
+                    cleanContext,
                     coroutineState.scopeIdentifier,
                     SuspensionPoint.AfterLastStep(steps.last()),
                     this,
                     scopeCapabilities,
+                    initialIteration = lastSuspended.iteration,
+                    initialCfhi = lastSuspended.childFailureHandlerIteration,
                 )
             } else {
                 // Case 3: Suspended after a step - Create a continuation to execute the next step
                 HappyPathContinuation(
                     connection,
-                    coroutineState.cooperationContext,
+                    cleanContext,
                     coroutineState.scopeIdentifier,
                     SuspensionPoint.BetweenSteps(
                         steps[suspendedStepIdx],
@@ -107,6 +129,8 @@ internal fun DistributedCoroutine.buildHappyPathContinuation(
                     ),
                     this,
                     scopeCapabilities,
+                    initialIteration = lastSuspended.iteration,
+                    initialCfhi = lastSuspended.childFailureHandlerIteration,
                 )
             }
         }

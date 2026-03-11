@@ -38,7 +38,7 @@ class PendingCoroutineRunSqlTest : StructuredCooperationTest() {
     private val childHandler4 = "child-handler-4"
 
     fun DistributedCoroutineIdentifier.step(stepName: String) =
-        ContinuationIdentifier(stepName, this)
+        ContinuationIdentifier(stepName = stepName, distributedCoroutineIdentifier = this)
 
     fun <T> List<T>.isEqualToInAnyOrder(other: List<T>, message: String) =
         Assertions.assertTrue(containsAll(other) && other.containsAll(this), message)

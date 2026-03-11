@@ -135,7 +135,7 @@ val latestSuspended =
     candidateSeens.appendAs(
         "latest_suspended",
         """
-        SELECT DISTINCT ON (message_event.message_id) message_event.cooperation_lineage, message_event.step, message_event.context, message_event.created_at
+        SELECT DISTINCT ON (message_event.message_id) message_event.cooperation_lineage, message_event.step, message_event.iteration, message_event.child_failure_handler_iteration, message_event.context, message_event.created_at
         FROM message_event
         JOIN candidate_seens ON message_event.cooperation_lineage = candidate_seens.cooperation_lineage
         WHERE message_event.type = 'SUSPENDED'
@@ -161,6 +161,8 @@ val childEmissionsInLatestStep =
             ON emissions.cooperation_lineage = latest_suspended.cooperation_lineage
         WHERE emissions.type = 'EMITTED'
             AND emissions.step = latest_suspended.step
+            AND emissions.iteration = latest_suspended.iteration
+            AND emissions.child_failure_handler_iteration IS NOT DISTINCT FROM latest_suspended.child_failure_handler_iteration
         """
             .trimIndent(),
     )
@@ -227,6 +229,8 @@ val childRollbackEmissionsInLatestStep =
             ON rollback_emissions.cooperation_lineage = latest_suspended.cooperation_lineage
         WHERE rollback_emissions.type = 'ROLLBACK_EMITTED'
             AND rollback_emissions.step = latest_suspended.step
+            AND rollback_emissions.iteration = latest_suspended.iteration
+            AND rollback_emissions.child_failure_handler_iteration IS NOT DISTINCT FROM latest_suspended.child_failure_handler_iteration
         """
             .trimIndent(),
     )
@@ -473,6 +477,8 @@ fun finalSelect(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolea
                 message.*,
                 seen_for_processing.cooperation_lineage,
                 latest_suspended.step,
+                latest_suspended.iteration,
+                latest_suspended.child_failure_handler_iteration,
                 last_event.context as latest_context,
                 CASE
                     -- See the explanation above to understand the logic behind this weird-looking selection

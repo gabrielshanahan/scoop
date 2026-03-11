@@ -39,6 +39,13 @@ sealed interface LastSuspendedStep {
      * Indicates a saga that completed [stepName].
      *
      * @param stepName The name of the step that completed and caused suspension
+     * @param iteration The iteration of the step that was suspended (0 for non-looping steps)
+     * @param childFailureHandlerIteration The child failure handler iteration at suspension time,
+     *   or null if not in a child failure handler
      */
-    data class SuspendedAfter(val stepName: String) : LastSuspendedStep
+    data class SuspendedAfter(
+        val stepName: String,
+        val iteration: Int = 0,
+        val childFailureHandlerIteration: Int? = null,
+    ) : LastSuspendedStep
 }
