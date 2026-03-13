@@ -101,8 +101,9 @@ internal abstract class BaseCooperationContinuation(
      * ### Key Decision Logic (see [resumeWith])
      *
      * **For BetweenSteps suspension points:**
-     * - **Child failure** (`LastStepResult.Failure`): Handle failures on the **previous step** (the
-     *   step that emitted the messages that failed) via [TransactionalStep.handleChildFailures]
+     * - **Child failure** (`LastStepResult.ChildFailed`): Handle failures on the **previous step**
+     *   (the step that emitted the messages that failed) via
+     *   [TransactionalStep.handleChildFailures]
      * - **Success** (`SuccessfullyInvoked`/`SuccessfullyRolledBack`): Execute the **next step** in
      *   the saga sequence
      *
@@ -261,7 +262,7 @@ internal abstract class BaseCooperationContinuation(
 
             is SuspensionPoint.BetweenSteps ->
                 when (lastStepResult) {
-                    is Continuation.LastStepResult.Failure -> {
+                    is Continuation.LastStepResult.ChildFailed -> {
                         // Child handlers failed - let the step that emitted them handle the failure
                         currentStep = suspensionPoint.previousStep
                         resumeCoroutine(lastStepResult)
@@ -354,7 +355,7 @@ internal abstract class BaseCooperationContinuation(
         lastStepResult: Continuation.LastStepResult
     ): Continuation.ContinuationResult =
         when (lastStepResult) {
-            is Continuation.LastStepResult.Failure -> {
+            is Continuation.LastStepResult.ChildFailed -> {
                 // Child handlers failed - let the current step handle the failures
                 currentStep.handleChildFailures(
                     this,

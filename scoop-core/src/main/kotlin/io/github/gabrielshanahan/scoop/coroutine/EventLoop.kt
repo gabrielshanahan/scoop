@@ -482,7 +482,7 @@ class EventLoop(
                     )
 
                 is RollbackState.Children.Rollbacks ->
-                    Continuation.LastStepResult.Failure(
+                    Continuation.LastStepResult.ChildFailed(
                         coroutineState.message,
                         coroutineState.rollbackState.throwable,
                     )
