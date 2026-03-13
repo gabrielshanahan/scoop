@@ -28,6 +28,7 @@ I do recommend you [read the articles](#how-does-it-solve-the-problem) first.
 - [Overview](#overview)
   - [Project Structure](#project-structure)
   - [The state of Scoop](#the-state-of-scoop)
+  - [Loops and control flow](#loops-and-control-flow)
   - [Data model](#data-model)
   - [Important components and high-level flow](#important-components-and-high-level-flow)
 - [Glossary of terms](#glossary-of-terms)
@@ -233,6 +234,7 @@ Then, take a look at the SQL and `EventLoopStrategy`:
   provides a placeholder solution of the ["who is listening" problem](https://developer.porn/posts/implementing-structured-cooperation/#building-and-maintaining-a-handler-topology) in Scoop.
 
 Finally, learn about individual functionalities:
+* [loops and control flow](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/DistributedCoroutine.kt) (`NextStep`),
 * cancellation requests (search for `CANCELLATION_REQUESTED`. Don't confuse this with [cancellation tokens](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CancellationToken.kt) bellow),
 * [cooperation context](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CooperationContext.kt),
 * [sleeping and scheduled steps](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/Sleep.kt)
@@ -294,7 +296,8 @@ Message handlers (sagas) in Scoop are non-blocking and horizontally scalable out
 work. Using Postgres for everything also allows Scoop to make strict transactional guarantees—a given transactional step of a saga will either complete
 in its entirety, including emitting messages, or it will not.
 
-Above and beyond that, Scoop supports cancellations, rollbacks (via compensating actions), timeouts (via deadlines), scheduling, periodic scheduling, and sleeping,
+Above and beyond that, Scoop supports cancellations, rollbacks (via compensating actions), timeouts (via deadlines), scheduling, periodic scheduling, sleeping,
+and [loops/control flow](#loops-and-control-flow) (via `NextStep.Repeat` and `NextStep.GoTo`),
 along with distributed exceptions, stack traces, and resource handling via a `try-finally` mechanism. Due to the way it's designed, many of these things are actually
 emergent, and not fundamental primitives. It also implements its own
 [context propagation](https://projectreactor.io/docs/core/release/reference/advancedFeatures/context.html) mechanism, which is a way of sharing contextual data
@@ -303,6 +306,36 @@ Kotlin coroutines.
 
 Scoop is implemented using a blocking (imperative) approach. If you're interested in the reactive version, it is available in
 [the first commit](https://github.com/gabrielshanahan/scoop/tree/aa775f8) of this repository.
+
+### Loops and control flow
+
+Scoop implements a version of `goto`, and therefore looping. A `NextStep` instance can be returned from `invoke` (and `handleChildFailures`, which overrides whatever was returned from `invoke`), which allows you to control what step is executed next. I'm pretty sure [this approach is general enough that any control flow primitive can be implemented upon it.](https://www.schoolofhaskell.com/user/dpiponi/the-mother-of-all-monads)
+
+```kotlin
+saga("order-processor", handlerRegistry.eventLoopStrategy()) {
+    step("validate") { scope, message, stepIteration ->
+        // stepIteration tells you how many times this step has run consecutively (0 on first run)
+        val result = validateOrder(message)
+        when {
+            result.isValid -> NextStep.Continue           // proceed to the next step
+            stepIteration < 3 -> NextStep.Repeat          // re-execute this step (increments stepIteration)
+            else -> NextStep.GoTo(2)                       // jump to step at index 2
+        }
+    }
+    step("process") { scope, message -> /* ... */ }
+    step("finalize") { scope, message -> /* ... */ }
+}
+```
+
+The three options are:
+- **`NextStep.Continue`** — advance to the next step (the default when using the simple `step { scope, message -> ... }` overload).
+- **`NextStep.Repeat`** — re-execute the same step. The `stepIteration` parameter increments on each consecutive re-execution (0, 1, 2, ...), so your step logic can decide when to stop repeating. This is equivalent to `GoTo(ownIndex)`.
+- **`NextStep.GoTo(stepIndex)`** — jump to any step by its index (0-based). This enables both forward jumps (skipping steps) and backward jumps (creating loops that span multiple steps).
+
+A few things to note:
+- Structured cooperation is fully respected during loops. Each time a step executes, if it emits messages, the saga suspends and waits for all child handlers to finish before the next iteration begins. This means that even inside a loop, you get the same transactional guarantees as anywhere else.
+- `stepIteration` resets to 0 whenever a *different* step starts executing. It only tracks consecutive re-executions of the same step.
+- When a saga that used loops needs to roll back, Scoop rolls back each *instance* of each step—so if a step ran 3 times via `Repeat`, its `rollback` is called 3 times (once per iteration, in reverse order), each time receiving the corresponding `stepIteration` value. The `childFailureHandlerIteration` parameter distinguishes rollbacks of the step's own invocation from rollbacks of emissions made during a `handleChildFailures` call.
 
 ### Data model
 From a data perspective, Scoop consists of two tables: `message` and `message_events`.
@@ -342,6 +375,8 @@ The column structure of `message_event` is (omitting those that are obvious):
 | `cooperation_lineage`  | An array of UUIDs defining the cooperation scope of a particular run of a saga. All records with equal values in this column represent a single run of a saga. Any prefixes of that value are parent runs, i.e. runs of sagas that emitted messages which eventually lead to this saga being run. And conversely, child saga runs can be found as those that have the current value as a prefix. |
 | `exception`            | Contains the serialized json of an exception, if relevant, or `null` otherwise.                                                                                                                                                                                                                                                                                                                  |
 | `context`              | Contains the serialized `CooperationContext`, if it contains any value, or `null` otherwise.                                                                                                                                                                                                                                                                                                     |
+| `next_step`            | Recorded on `SUSPENDED` events to indicate which step index the saga should execute next. Determined by the `NextStep` returned from `invoke`: `Continue` → current index + 1 (or `null` if last step), `Repeat` → current index, `GoTo(n)` → n. `null` means the saga should finish and transition to `COMMITTED`. Only meaningful on the happy path; always `null` during rollback. |
+| `child_failure_handler_iteration` | Tracks which invocation of `handleChildFailures` produced a given event. When `handleChildFailures` emits messages whose handlers then fail, it is called again with an incremented counter (0, 1, 2, ...). `null` for events not related to child failure handling. |
 
 
 For a slightly gentler introduction, read the blog posts linked above.

@@ -3,9 +3,11 @@ package io.github.gabrielshanahan.scoop.coroutine.continuation
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScope
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
+import io.github.gabrielshanahan.scoop.coroutine.NextStep
 import io.github.gabrielshanahan.scoop.coroutine.TransactionalStep
 import io.github.gabrielshanahan.scoop.coroutine.VariableName
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
+import io.github.gabrielshanahan.scoop.coroutine.eventloop.ChildFailureHandlerIteration
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.CooperationRoot
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ScopeCapabilities
 import io.github.gabrielshanahan.scoop.messaging.Message
@@ -82,8 +84,18 @@ internal sealed interface SuspensionPoint {
  * @param distributedCoroutine The saga definition being executed
  * @param scopeCapabilities Provides the implementations of capabilities exposed by
  *   [CooperationScope] that require interacting with the database
+ * @param stepIteration How many times the current step has run consecutively (0 on first run).
+ *   Passed to [TransactionalStep.invoke] and [TransactionalStep.rollback].
+ * @param childFailureHandlerIteration Tracks the child failure handler state. Starts as
+ *   [ChildFailureHandlerIteration.NoChildFailure][io.github.gabrielshanahan.scoop.coroutine.eventloop.ChildFailureHandlerIteration.NoChildFailure],
+ *   then becomes
+ *   [HandlerIteration(0)][io.github.gabrielshanahan.scoop.coroutine.eventloop.ChildFailureHandlerIteration.HandlerIteration]
+ *   on the first child failure handling invocation. Incremented each time [handleFailuresOrResume]
+ *   dispatches to [TransactionalStep.handleChildFailures], and included in the
+ *   [ContinuationIdentifier] so that each child-failure-handler invocation produces distinct event
+ *   records.
  */
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LongParameterList")
 internal abstract class BaseCooperationContinuation(
     override val connection: Connection,
     override var context: CooperationContext,
@@ -91,6 +103,8 @@ internal abstract class BaseCooperationContinuation(
     private val suspensionPoint: SuspensionPoint,
     protected val distributedCoroutine: DistributedCoroutine,
     private val scopeCapabilities: ScopeCapabilities,
+    private var stepIteration: Int,
+    private var childFailureHandlerIteration: ChildFailureHandlerIteration,
 ) : CooperationContinuation {
 
     /**
@@ -133,7 +147,13 @@ internal abstract class BaseCooperationContinuation(
     override val emittedMessages: MutableList<Message> = mutableListOf()
 
     override val continuationIdentifier: ContinuationIdentifier
-        get() = ContinuationIdentifier(currentStep.name, distributedCoroutine.identifier)
+        get() =
+            ContinuationIdentifier(
+                stepName = currentStep.name,
+                stepIteration = stepIteration,
+                childFailureHandlerIteration = childFailureHandlerIteration,
+                distributedCoroutineIdentifier = distributedCoroutine.identifier,
+            )
 
     /**
      * Provides SQL that returns exception records when this continuation should give up and fail.
@@ -325,6 +345,12 @@ internal abstract class BaseCooperationContinuation(
      * **Failure Result**: Always calls [TransactionalStep.handleChildFailures]
      * - Child handlers failed, so the current step needs to handle those failures
      * - The step can choose to retry, ignore, or propagate the failure
+     * - Increments [childFailureHandlerIteration] to track how many times failure handling has run
+     *   for this step
+     * - Passes [stepIteration] and [Continuation.LastStepResult.ChildFailed.nextStep] so the
+     *   handler has full context about the step that spawned the failing children
+     * - The returned [NextStep] overrides the original invoke result and is carried in the
+     *   [Continuation.ContinuationResult.Suspend] result
      * - If it doesn't throw, then always results in suspension because failure handling may emit
      *   messages of its own
      * - Messages emitted during failure handling are attributed to [currentStep]
@@ -332,11 +358,16 @@ internal abstract class BaseCooperationContinuation(
      * **SuccessfullyInvoked Result**: Calls [TransactionalStep.invoke] via [resume]
      * - Previous cycle completed successfully, continue with normal execution
      * - This is the "happy path" forward progress through the saga
+     * - Passes [stepIteration] so the step knows how many times it has run consecutively
+     * - The returned [NextStep] controls whether to continue, repeat, or jump to another step
      * - May suspend if the step emits messages, or complete if this is the last step
      *
      * **SuccessfullyRolledBack Result**: Calls [TransactionalStep.rollback] via [resume]
      * - Previous rollback cycle completed successfully, continue with rollback execution
      * - This is the compensating action execution during saga rollback
+     * - Passes [stepIteration] and a [ChildFailureHandlerIteration] derived from
+     *   [childFailureHandlerIteration]
+     * - Rollback always returns [NextStep.Continue]
      * - May suspend if rollback emits messages, or complete the rollback sequence
      *
      * The dispatch logic ensures that:
@@ -356,40 +387,64 @@ internal abstract class BaseCooperationContinuation(
     ): Continuation.ContinuationResult =
         when (lastStepResult) {
             is Continuation.LastStepResult.ChildFailed -> {
-                // Child handlers failed - let the current step handle the failures
-                currentStep.handleChildFailures(
-                    this,
-                    lastStepResult.message,
-                    lastStepResult.throwable,
-                )
+                // Increment child failure handler iteration for each failure handling invocation
+                val incrementedIteration = childFailureHandlerIteration.incremented()
+                childFailureHandlerIteration = incrementedIteration
+                val nextStep =
+                    currentStep.handleChildFailures(
+                        this,
+                        lastStepResult.message,
+                        lastStepResult.throwable,
+                        stepIteration,
+                        incrementedIteration.iteration,
+                        lastStepResult.nextStep,
+                    )
                 // Failure handling always suspends (may have emitted retry messages)
-                Continuation.ContinuationResult.Suspend(emittedMessages)
+                Continuation.ContinuationResult.Suspend(emittedMessages, validateNextStep(nextStep))
             }
 
             is Continuation.LastStepResult.SuccessfullyInvoked ->
                 // Previous execution succeeded - continue with normal forward execution
-                resume { currentStep.invoke(this, lastStepResult.message) }
+                resume { currentStep.invoke(this, lastStepResult.message, stepIteration) }
 
             is Continuation.LastStepResult.SuccessfullyRolledBack ->
                 // Previous rollback succeeded - continue with compensating action execution
                 resume {
-                    currentStep.rollback(this, lastStepResult.message, lastStepResult.throwable)
+                    currentStep.rollback(
+                        this,
+                        lastStepResult.message,
+                        lastStepResult.throwable,
+                        stepIteration,
+                        childFailureHandlerIteration,
+                    )
+                    NextStep.Continue
                 }
         }
+
+    /** Validates that a [NextStep.GoTo] index is within the bounds of the saga's steps. */
+    private fun validateNextStep(nextStep: NextStep): NextStep {
+        if (nextStep is NextStep.GoTo) {
+            require(nextStep.stepIndex in distributedCoroutine.steps.indices) {
+                "GoTo step index ${nextStep.stepIndex} is out of bounds " +
+                    "(saga has ${distributedCoroutine.steps.size} steps)"
+            }
+        }
+        return nextStep
+    }
 
     /**
      * Helper method for normal step execution that determines suspension vs. completion.
      *
      * @param resumeStep Lambda containing the step execution logic ([TransactionalStep.invoke] or
-     *   [TransactionalStep.rollback])
+     *   [TransactionalStep.rollback]) that returns a [NextStep]
      */
-    private fun resume(resumeStep: () -> Unit): Continuation.ContinuationResult =
+    private fun resume(resumeStep: () -> NextStep): Continuation.ContinuationResult =
         if (suspensionPoint is SuspensionPoint.AfterLastStep) {
             // All steps completed - saga is done, don't execute the step
             Continuation.ContinuationResult.Success
         } else {
             // More steps remain - execute this step and suspend to wait for children
-            resumeStep()
-            Continuation.ContinuationResult.Suspend(emittedMessages)
+            val nextStep = validateNextStep(resumeStep())
+            Continuation.ContinuationResult.Suspend(emittedMessages, nextStep)
         }
 }

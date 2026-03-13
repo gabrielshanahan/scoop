@@ -6,8 +6,9 @@ import io.github.gabrielshanahan.scoop.coroutine.context.emptyContext
 import io.github.gabrielshanahan.scoop.coroutine.continuation.Continuation
 import io.github.gabrielshanahan.scoop.coroutine.continuation.buildHappyPathContinuation
 import io.github.gabrielshanahan.scoop.coroutine.continuation.buildRollbackPathContinuation
-import io.github.gabrielshanahan.scoop.coroutine.eventloop.SuspensionState
+import io.github.gabrielshanahan.scoop.coroutine.eventloop.ChildFailureHandlerIteration
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.RollbackState
+import io.github.gabrielshanahan.scoop.coroutine.eventloop.SuspensionState
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.CooperationException
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.CooperationFailure
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.MessageEventRepository
@@ -17,6 +18,7 @@ import io.github.gabrielshanahan.scoop.transactional
 import io.github.gabrielshanahan.scoop.whileISaySo
 import java.sql.Connection
 import java.time.Duration
+import java.time.Instant
 import java.util.*
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -210,7 +212,10 @@ class EventLoop(
      *
      * ### Execution Progress ([SuspensionState])
      * - **NotSuspendedYet**: Brand new saga that hasn't executed any steps yet
-     * - **SuspendedAfterStep(stepName)**: Saga that completed a step and is waiting to proceed
+     * - **SuspendedBetweenSteps(completedStep, nextStep)**: Saga completed a step, next step is
+     *   known
+     * - **LastStepFinished(completedStep)**: Saga completed its final step
+     * - **SuspendedAfterStepRollback(completedRollbackStep)**: Saga is mid-rollback
      *
      * ### Rollback Status ([RollbackState])
      * - **Gucci**: Everything is fine, proceeding normally
@@ -234,14 +239,16 @@ class EventLoop(
      *
      * These dimensions combine to determine what the saga should do next:
      * - **(NotSuspendedYet, Gucci)**: Execute the first step
-     * - **(SuspendedAfterStep, Gucci)**: Execute the next step
-     * - **(SuspendedAfterStep, SuccessfullyRolledBackLastStep)**: Continue rolling back
-     * - **(SuspendedAfterStep, ChildrenFailed...)**:
+     * - **(SuspendedBetweenSteps, Gucci)**: Execute the next step
+     * - **(LastStepFinished, Gucci)**: Commit the saga
+     * - **(SuspendedAfterStepRollback, SuccessfullyRolledBackLastStep)**: Continue rolling back
+     * - **(SuspendedBetweenSteps/LastStepFinished, ChildrenFailed...)**:
      *   [Handle child failures][TransactionalStep.handleChildFailures] and potentially start
      *   rolling back (or failing the rollback if one is in progress)
      *
      * This state is used to build the appropriate continuation for resuming execution.
      */
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun fetchSomePendingCoroutineState(
         connection: Connection,
         distributedCoroutine: DistributedCoroutine,
@@ -384,13 +391,98 @@ class EventLoop(
                     }
                 }
 
+            // For rollback, we need the actual execution history to know which
+            // step executions to roll back. The data comes from the PendingCoroutineRun
+            // query as a JSON array; we only parse it when actually rolling back.
+            val executedStepInstances =
+                if (rollbackState is RollbackState.Me.RollingBack) {
+                    jsonbHelper
+                        .fromPGobjectToList<Map<String, Any?>>(result.executedStepInstances)
+                        .map { json ->
+                            val cfhi = (json["child_failure_handler_iteration"] as? Number)?.toInt()
+                            StepInstance(
+                                step = json["step"] as String,
+                                childFailureHandlerIteration =
+                                    cfhi?.let { ChildFailureHandlerIteration.HandlerIteration(it) }
+                                        ?: ChildFailureHandlerIteration.NoChildFailure,
+                                suspendedAt = Instant.parse(json["suspended_at"] as String),
+                            )
+                        }
+                } else {
+                    emptyList()
+                }
+
+            // Compute stepIteration for the NEXT step to be executed.
+            // We use the next step name (from next_step index) because that's the step
+            // whose invoke will receive this stepIteration value.
+            // Computed from the executedStepInstances JSON already returned by the query:
+            // count consecutive SUSPENDED events (from most recent, with no child failure
+            // handler iteration) that match the next step name.
+            val stepIteration =
+                if (result.nextStep != null) {
+                    check(result.nextStep in distributedCoroutine.steps.indices) {
+                        "next_step ${result.nextStep} is out of bounds for coroutine " +
+                            "${distributedCoroutine.identifier.name} with " +
+                            "${distributedCoroutine.steps.size} steps"
+                    }
+                    val nextStepName = distributedCoroutine.steps[result.nextStep].name
+                    jsonbHelper
+                        .fromPGobjectToList<Map<String, Any?>>(result.executedStepInstances)
+                        .filter { (it["child_failure_handler_iteration"] as? Number) == null }
+                        .takeWhile { it["step"] == nextStepName }
+                        .size
+                } else {
+                    0
+                }
+
+            // From latest_suspended.step (the last SUSPENDED event) null means this is a
+            // brand new saga that hasn't executed any steps yet
+            val suspensionState =
+                if (result.step == null) {
+                    SuspensionState.NotSuspendedYet
+                } else {
+                    val childFailureHandlerIteration =
+                        result.childFailureHandlerIteration?.let {
+                            ChildFailureHandlerIteration.HandlerIteration(it)
+                        } ?: ChildFailureHandlerIteration.NoChildFailure
+
+                    val isSyntheticRollbackStep =
+                        rollbackState is RollbackState.Me.RollingBack &&
+                            distributedCoroutine.steps.none { it.name == result.step }
+
+                    when {
+                        isSyntheticRollbackStep ->
+                            // Rollback path: step name is synthetic (e.g.,
+                            // "rollingBack-Step1-iteration-0"). Next step is determined
+                            // from the rollback step sequence, not from next_step.
+                            SuspensionState.SuspendedAfterStepRollback(
+                                result.step,
+                                result.suspendedAt!!,
+                                childFailureHandlerIteration,
+                            )
+
+                        result.nextStep != null ->
+                            // Happy path: between two steps
+                            SuspensionState.SuspendedBetweenSteps(
+                                result.step,
+                                distributedCoroutine.steps[result.nextStep].name,
+                                result.suspendedAt!!,
+                                childFailureHandlerIteration,
+                            )
+
+                        else ->
+                            // Happy path: last step finished, saga is done
+                            SuspensionState.LastStepFinished(
+                                result.step,
+                                result.suspendedAt!!,
+                                childFailureHandlerIteration,
+                            )
+                    }
+                }
+
             return CoroutineState(
                 message,
-
-                // From latest_suspended.step (the last SUSPENDED event) null means this is a
-                // brand new saga that hasn't executed any steps yet
-                if (result.step == null) SuspensionState.NotSuspendedYet
-                else SuspensionState.SuspendedAfterStep(result.step),
+                suspensionState,
 
                 // The cooperation lineage from the SEEN event for this saga. This lineage
                 // extends the parent's lineage and identifies this saga's position in the
@@ -404,6 +496,8 @@ class EventLoop(
                 // later
                 latestScopeContext + latestContext,
                 rollbackState,
+                executedStepInstances,
+                stepIteration,
             )
         }
     }
@@ -450,6 +544,7 @@ class EventLoop(
      * @param coroutineState The current execution state (step position, context, rollback status)
      * @return The result of continuation execution (Success, Failure, or Suspend)
      */
+    @Suppress("CyclomaticComplexMethod", "LongMethod", "NestedBlockDepth")
     private fun resumeCoroutine(
         connection: Connection,
         distributedCoroutine: DistributedCoroutine,
@@ -481,11 +576,34 @@ class EventLoop(
                         coroutineState.rollbackState.throwable,
                     )
 
-                is RollbackState.Children.Rollbacks ->
+                is RollbackState.Children.Rollbacks -> {
+                    // Reconstruct invoke's NextStep from the suspension state
+                    val nextStep =
+                        when (val lastStep = coroutineState.suspensionState) {
+                            is SuspensionState.SuspendedBetweenSteps -> {
+                                val completedStepIdx =
+                                    distributedCoroutine.steps.indexOfFirst {
+                                        it.name == lastStep.completedStep
+                                    }
+                                val nextStepIdx =
+                                    distributedCoroutine.steps.indexOfFirst {
+                                        it.name == lastStep.nextStep
+                                    }
+                                when {
+                                    nextStepIdx == completedStepIdx -> NextStep.Repeat
+                                    nextStepIdx == completedStepIdx + 1 -> NextStep.Continue
+                                    else -> NextStep.GoTo(nextStepIdx)
+                                }
+                            }
+                            is SuspensionState.LastStepFinished -> NextStep.Continue
+                            else -> NextStep.Continue
+                        }
                     Continuation.LastStepResult.ChildFailed(
                         coroutineState.message,
                         coroutineState.rollbackState.throwable,
+                        nextStep,
                     )
+                }
             }
 
         val continuationResult = cooperativeContinuation.resumeWith(input)
@@ -519,7 +637,12 @@ class EventLoop(
                 }
 
             is Continuation.ContinuationResult.Suspend ->
-                markSuspended(cooperativeContinuation, coroutineState.message.id)
+                markSuspended(
+                    cooperativeContinuation,
+                    coroutineState.message.id,
+                    continuationResult.nextStep,
+                    distributedCoroutine,
+                )
         }
 
         logger.info(
@@ -538,8 +661,34 @@ class EventLoop(
     private fun markRolledBack(scope: CooperationScope, messageId: UUID) =
         mark(scope, scope.connection, messageId, "ROLLED_BACK")
 
-    private fun markSuspended(scope: CooperationScope, messageId: UUID) =
-        mark(scope, scope.connection, messageId, "SUSPENDED")
+    private fun markSuspended(
+        scope: CooperationScope,
+        messageId: UUID,
+        nextStep: NextStep,
+        distributedCoroutine: DistributedCoroutine,
+    ) {
+        val currentStepIdx =
+            distributedCoroutine.steps.indexOfFirst {
+                it.name == scope.continuation.continuationIdentifier.stepName
+            }
+        // For rollback steps (synthetic names not in distributedCoroutine.steps),
+        // currentStepIdx will be -1. next_step is not used on the rollback path
+        // (rollback uses step names and executedStepInstances), so we write null.
+        val nextStepIndex =
+            if (currentStepIdx == -1) {
+                null
+            } else {
+                when (nextStep) {
+                    is NextStep.Continue -> {
+                        val next = currentStepIdx + 1
+                        if (next >= distributedCoroutine.steps.size) null else next
+                    }
+                    is NextStep.Repeat -> currentStepIdx
+                    is NextStep.GoTo -> nextStep.stepIndex
+                }
+            }
+        mark(scope, scope.connection, messageId, "SUSPENDED", nextStep = nextStepIndex)
+    }
 
     private fun markRollingBackInSeparateTransaction(
         scope: CooperationScope,
@@ -565,12 +714,14 @@ class EventLoop(
             }
             .join()
 
+    @Suppress("LongParameterList")
     private fun mark(
         scope: CooperationScope,
         connection: Connection,
         messageId: UUID,
         messageEventType: String,
         exception: Throwable? = null,
+        nextStep: Int? = null,
     ) {
         val cooperationFailure =
             exception?.let {
@@ -579,6 +730,14 @@ class EventLoop(
                     scope.continuation.continuationIdentifier.distributedCoroutineIdentifier
                         .renderAsString(),
                 )
+            }
+
+        val childFailureHandlerIteration =
+            when (
+                val state = scope.continuation.continuationIdentifier.childFailureHandlerIteration
+            ) {
+                is ChildFailureHandlerIteration.NoChildFailure -> null
+                is ChildFailureHandlerIteration.HandlerIteration -> state.iteration
             }
 
         return messageEventRepository.insertMessageEvent(
@@ -591,9 +750,21 @@ class EventLoop(
             scope.scopeIdentifier.cooperationLineage,
             cooperationFailure,
             scope.context,
+            childFailureHandlerIteration,
+            nextStep,
         )
     }
 }
+
+/**
+ * Represents a specific execution instance of a step, identified by name, child-failure-handler
+ * state, and the timestamp of the SUSPENDED event.
+ */
+data class StepInstance(
+    val step: String,
+    val childFailureHandlerIteration: ChildFailureHandlerIteration,
+    val suspendedAt: Instant,
+)
 
 /**
  * Represents the execution state of a saga at a specific point in time.
@@ -608,11 +779,13 @@ class EventLoop(
  * The EventLoop uses this state to build the appropriate [Continuation] for resuming execution.
  *
  * @param message The message that triggered this saga instance
- * @param suspensionState The last step that completed, or [SuspensionState.NotSuspendedYet] for
- *   new sagas
+ * @param suspensionState The last step that completed, or [SuspensionState.NotSuspendedYet] for new
+ *   sagas
  * @param scopeIdentifier The cooperation scope this saga is running in
  * @param cooperationContext Shared context data (deadlines, cancellation tokens, custom data)
  * @param rollbackState Whether the saga is rolling back and what exceptions caused it
+ * @param executedStepInstances List of step instances that have been executed (for rollback
+ *   ordering)
  */
 data class CoroutineState(
     val message: Message,
@@ -620,4 +793,6 @@ data class CoroutineState(
     val scopeIdentifier: CooperationScopeIdentifier.Child,
     val cooperationContext: CooperationContext,
     val rollbackState: RollbackState,
+    val executedStepInstances: List<StepInstance>,
+    val stepIteration: Int,
 )

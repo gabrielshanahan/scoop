@@ -1,5 +1,6 @@
 package io.github.gabrielshanahan.scoop.coroutine.continuation
 
+import io.github.gabrielshanahan.scoop.coroutine.NextStep
 import io.github.gabrielshanahan.scoop.messaging.Message
 
 /**
@@ -69,7 +70,6 @@ import io.github.gabrielshanahan.scoop.messaging.Message
  * Each continuation encapsulates the logic for executing exactly one step in its respective
  * execution mode (forward or rollback), then returns control to the EventLoop.
  */
-// one started!
 interface Continuation {
 
     /**
@@ -148,9 +148,22 @@ interface Continuation {
          * method completed successfully and committed, but one or more child handlers that were
          * spawned by emitting messages failed. The step itself did not fail - if it had, the
          * transaction would never have committed and there would be nothing to roll back.
+         *
+         * Note: [nextStep] is only present in this variant because it's the only scenario where the
+         * continuation needs to know what the previous step returned. In [SuccessfullyInvoked], the
+         * step result was already persisted in the SUSPENDED event and used to determine the next
+         * step — the continuation doesn't need it again. In [SuccessfullyRolledBack], rollback
+         * steps always proceed linearly through the rollback sequence and don't produce a
+         * [NextStep]. Here, [nextStep] is needed because
+         * [TransactionalStep.handleChildFailures][io.github.gabrielshanahan.scoop.coroutine.TransactionalStep.handleChildFailures]
+         * receives it to make decisions about how to handle the failure (e.g., whether to override
+         * the original navigation decision).
          */
-        data class ChildFailed(override val message: Message, val throwable: Throwable) :
-            LastStepResult
+        data class ChildFailed(
+            override val message: Message,
+            val throwable: Throwable,
+            val nextStep: NextStep,
+        ) : LastStepResult
     }
 
     /**
@@ -171,7 +184,8 @@ interface Continuation {
          *
          * @param emittedMessages Messages that were emitted during this step's execution
          */
-        data class Suspend(val emittedMessages: List<Message>) : ContinuationResult
+        data class Suspend(val emittedMessages: List<Message>, val nextStep: NextStep) :
+            ContinuationResult
 
         /**
          * The saga completed successfully.

@@ -10,6 +10,7 @@ import io.github.gabrielshanahan.scoop.messaging.Message
 import io.github.gabrielshanahan.scoop.messaging.MessageRepository
 import io.github.gabrielshanahan.scoop.util.uuidV7
 import java.sql.Connection
+import java.time.Instant
 import org.postgresql.util.PGobject
 
 /**
@@ -84,16 +85,24 @@ interface ScopeCapabilities {
     ): CooperationRoot
 
     /**
-     * Triggers rollback for all messages emitted from a specific step.
+     * Triggers rollback for all messages emitted from a specific step execution instance.
      *
      * This method is called during rollback continuation execution to initiate compensating actions
-     * in all child handlers that were spawned from a particular step.
+     * in all child handlers that were spawned from a particular step execution. Each step execution
+     * is identified by the timestamp of the SUSPENDED event that closed its tick — since each event
+     * loop tick produces EMITTED and SUSPENDED events with monotonic timestamps, this timestamp
+     * uniquely identifies which emissions belong to that specific step execution.
      *
      * @param scope The cooperation scope requesting the rollback
-     * @param stepName The name of the step whose emissions should be rolled back
+     * @param suspendedAt The timestamp of the SUSPENDED event that closed the tick whose emissions
+     *   should be rolled back
      * @param throwable The original exception that triggered the rollback
      */
-    fun emitRollbacksForEmissions(scope: CooperationScope, stepName: String, throwable: Throwable)
+    fun emitRollbacksForEmissions(
+        scope: CooperationScope,
+        suspendedAt: Instant,
+        throwable: Throwable,
+    )
 
     /**
      * Checks if the saga should give up execution and throws an exception if so.
@@ -330,7 +339,7 @@ class Capabilities(
 
     override fun emitRollbacksForEmissions(
         scope: CooperationScope,
-        stepName: String,
+        suspendedAt: Instant,
         throwable: Throwable,
     ) {
         val cooperationFailure =
@@ -342,13 +351,13 @@ class Capabilities(
 
         messageEventRepository.insertRollbackEmittedEventsForStep(
             scope.connection,
-            stepName,
             scope.scopeIdentifier.cooperationLineage,
             scope.continuation.continuationIdentifier.distributedCoroutineIdentifier.name,
             scope.continuation.continuationIdentifier.distributedCoroutineIdentifier.instance,
             scope.continuation.continuationIdentifier.stepName,
             cooperationFailure,
             scope.context,
+            suspendedAt,
         )
     }
 
