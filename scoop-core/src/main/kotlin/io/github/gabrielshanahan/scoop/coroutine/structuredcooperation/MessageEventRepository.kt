@@ -5,6 +5,7 @@ import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
 import io.github.gabrielshanahan.scoop.coroutine.context.isNotEmpty
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.strategy.EventLoopStrategy
 import java.sql.Connection
+import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
@@ -12,6 +13,7 @@ import org.codejargon.fluentjdbc.api.FluentJdbc
 import org.intellij.lang.annotations.Language
 import org.postgresql.util.PGobject
 
+@Suppress("TooManyFunctions")
 class MessageEventRepository(
     private val jsonbHelper: JsonbHelper,
     private val fluentJdbc: FluentJdbc,
@@ -67,6 +69,7 @@ class MessageEventRepository(
      * @param cooperationLineage Extended cooperation lineage for child handlers
      * @param context Optional cooperation context to propagate to child handlers
      */
+    @Suppress("LongParameterList")
     fun insertScopedEmittedEvent(
         connection: Connection,
         messageId: UUID,
@@ -80,7 +83,7 @@ class MessageEventRepository(
             .queryOn(connection)
             .update(
                 """
-                INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, context) 
+                INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, context)
                 VALUES (:messageId, 'EMITTED', :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :context)
                 """
                     .trimIndent()
@@ -276,8 +279,8 @@ class MessageEventRepository(
         cooperationLineage: List<UUID>,
         exception: CooperationFailure?,
         context: CooperationContext?,
-        childFailureHandlerIteration: Int? = null,
-        nextStep: Int? = null,
+        childFailureHandlerIteration: Int?,
+        nextStep: Int?,
     ) {
         fluentJdbc
             .queryOn(connection)
@@ -318,17 +321,24 @@ class MessageEventRepository(
      * This method is called during rollback continuation execution via
      * [ScopeCapabilities.emitRollbacksForEmissions].
      */
+    /**
+     * Records rollback requests for all messages emitted in a specific tick, identified by the
+     * SUSPENDED event's timestamp. Uses a NOT EXISTS pattern to find EMITTED events that belong to
+     * the tick closed by the SUSPENDED event at [suspendedAt].
+     */
+    @Suppress("LongParameterList")
     fun insertRollbackEmittedEventsForStep(
         connection: Connection,
-        stepName: String,
         cooperationLineage: List<UUID>,
         coroutineName: String,
         coroutineIdentifier: String,
         scopeStepName: String?,
         exception: CooperationFailure,
         context: CooperationContext?,
+        suspendedAt: Instant,
     ) {
         val lineageArray = connection.createArrayOf("uuid", cooperationLineage.toTypedArray())
+        val suspendedAtTimestamp = java.sql.Timestamp.from(suspendedAt)
 
         fluentJdbc
             .queryOn(connection)
@@ -338,22 +348,28 @@ class MessageEventRepository(
                     SELECT cooperation_lineage, message_id
                     FROM message_event
                     WHERE type = 'EMITTED'
-                        AND step = :stepName
                         AND cooperation_lineage = :cooperationLineage
+                        AND created_at < :suspendedAt
+                        AND NOT EXISTS (
+                            SELECT 1 FROM message_event mid
+                            WHERE mid.cooperation_lineage = :cooperationLineage
+                              AND mid.type = 'SUSPENDED'
+                              AND mid.created_at > message_event.created_at
+                              AND mid.created_at < :suspendedAt
+                        )
                 )
                 INSERT INTO message_event (
-                    message_id, type, 
+                    message_id, type,
                     cooperation_lineage, coroutine_name, coroutine_identifier, step,
                     exception, context
                 )
-                SELECT 
-                    message_id, 'ROLLBACK_EMITTED', 
+                SELECT
+                    message_id, 'ROLLBACK_EMITTED',
                     :cooperationLineage, :coroutineName, :coroutineIdentifier, :scopeStepName, :exception, :context
                 FROM emitted_record
                 """
                     .trimIndent()
             )
-            .namedParam("stepName", stepName)
             .namedParam("cooperationLineage", lineageArray)
             .namedParam("coroutineName", coroutineName)
             .namedParam("coroutineIdentifier", coroutineIdentifier)
@@ -363,6 +379,7 @@ class MessageEventRepository(
                 "context",
                 context?.takeIf { it.isNotEmpty() }?.let { jsonbHelper.toPGobject(it) },
             )
+            .namedParam("suspendedAt", suspendedAtTimestamp)
             .run()
     }
 
@@ -480,7 +497,7 @@ class MessageEventRepository(
                 WITH
                 -- Find EMITTED records missing a SEEN
                 emitted_missing_seen AS (
-                    SELECT emitted.message_id, emitted.cooperation_lineage, emitted.context, emitted.step
+                    SELECT emitted.message_id, emitted.cooperation_lineage, emitted.context
                     FROM message_event emitted
                     LEFT JOIN message_event AS coroutine_seen
                         ON coroutine_seen.message_id = emitted.message_id AND coroutine_seen.type = 'SEEN' AND coroutine_seen.coroutine_name = :coroutine_name
@@ -500,24 +517,32 @@ class MessageEventRepository(
                         FOR UPDATE SKIP LOCKED
                     ) parent_seen_lock_attempt ON parent_seen_exists.id IS NOT NULL
                     LEFT JOIN LATERAL (
-                        -- Get the last event in parent sequence along with its type and step
-                        SELECT type, step
+                        -- Get the last event in parent sequence - validate it's a SUSPENDED
+                        -- and that this EMITTED belongs to its tick (no intervening SUSPENDED)
+                        SELECT type, created_at
                         FROM message_event last_event
                         WHERE last_event.cooperation_lineage = parent_seen_exists.cooperation_lineage
                         ORDER BY last_event.created_at DESC
                         LIMIT 1
                     ) last_parent_event ON parent_seen_exists.id IS NOT NULL
-                    WHERE emitted.type = 'EMITTED' 
+                    WHERE emitted.type = 'EMITTED'
                         AND coroutine_seen.id IS NULL
                         AND (
                             -- Either no SEEN record exists (i.e., this is a toplevel emission, and there's nothing to lock)
                             parent_seen_exists.id IS NULL
-                            -- OR the SEEN record exists AND we successfully locked it AND the parent sequence's last event is SUSPENDED with matching step
+                            -- OR the SEEN record exists AND we successfully locked it AND the parent sequence's last event is SUSPENDED
+                            -- and this EMITTED belongs to the latest tick (no SUSPENDED between this EMITTED and the latest SUSPENDED)
                             OR (
-                                parent_seen_exists.id IS NOT NULL 
+                                parent_seen_exists.id IS NOT NULL
                                 AND parent_seen_lock_attempt.locked IS NOT NULL
                                 AND last_parent_event.type = 'SUSPENDED'
-                                AND last_parent_event.step = emitted.step
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM message_event mid
+                                    WHERE mid.cooperation_lineage = parent_seen_exists.cooperation_lineage
+                                      AND mid.type = 'SUSPENDED'
+                                      AND mid.created_at > emitted.created_at
+                                      AND mid.created_at < last_parent_event.created_at
+                                )
                             )
                         )
                         -- EventLoopStrategy says we're good to go
@@ -627,13 +652,18 @@ class MessageEventRepository(
      * @param payload The message payload
      * @param createdAt When the message was originally created
      * @param step The last step that was suspended (null if not suspended yet)
-     * @param nextStep The index of the next step to execute (determined by [StepResult]), or null
-     *   if the saga completed
+     * @param nextStep The index of the next step to execute (determined by [NextStep]), or null if
+     *   the saga completed
      * @param suspendedAt The timestamp of the last SUSPENDED event, or null if the saga hasn't been
      *   suspended yet. Each event loop tick produces EMITTED and SUSPENDED events with monotonic
      *   timestamps, so this timestamp identifies which tick produced which emissions — enabling
-     *   correct rollback scoping and child continuation matching. See
-     *   [insertRollbackEmittedEventsForStep] and [startContinuationsForCoroutine] for usage
+     *   correct rollback scoping and child continuation matching. During rollback, each
+     *   [StepInstance][io.github.gabrielshanahan.scoop.coroutine.StepInstance] carries this
+     *   timestamp so that
+     *   [ScopeCapabilities.emitRollbacksForEmissions][io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ScopeCapabilities.emitRollbacksForEmissions]
+     *   can identify exactly which child emissions belong to that specific step execution. See
+     *   [buildRollbackSteps][io.github.gabrielshanahan.scoop.coroutine.continuation.buildRollbackSteps]
+     *   for the rollback logic that consumes this
      * @param childFailureHandlerIteration The iteration counter for the child failure handler, or
      *   null if not in a child failure handling context
      * @param latestScopeContext Under certain conditions, the context from the second-to-last
@@ -645,6 +675,8 @@ class MessageEventRepository(
      *   failed
      * @param rollingBackException The exception that caused this saga to enter rollback mode (if
      *   any)
+     * @param executedStepInstances JSON array of executed step instances (SUSPENDED events with
+     *   step, child_failure_handler_iteration, and suspended_at), used to build the rollback plan
      */
     data class PendingCoroutineRun(
         val messageId: UUID,
@@ -654,13 +686,14 @@ class MessageEventRepository(
         val createdAt: OffsetDateTime,
         val step: String?,
         val nextStep: Int?,
-        val suspendedAt: java.time.Instant?,
+        val suspendedAt: Instant?,
         val childFailureHandlerIteration: Int?,
         val latestScopeContext: PGobject?,
         val latestContext: PGobject?,
         val childRolledBackExceptions: PGobject,
         val childRollbackFailedExceptions: PGobject,
         val rollingBackException: PGobject?,
+        val executedStepInstances: PGobject,
     )
 
     /**
@@ -747,8 +780,7 @@ class MessageEventRepository(
                             (it.getArray("cooperation_lineage").array as Array<UUID>).toList(),
                         step = it.getString("step"),
                         nextStep = it.getObject("next_step") as Int?,
-                        suspendedAt =
-                            it.getTimestamp("suspended_at")?.toInstant(),
+                        suspendedAt = it.getTimestamp("suspended_at")?.toInstant(),
                         childFailureHandlerIteration =
                             it.getObject("child_failure_handler_iteration") as Int?,
                         latestScopeContext = it.getObject("latest_scope_context") as PGobject?,
@@ -758,6 +790,7 @@ class MessageEventRepository(
                         childRollbackFailedExceptions =
                             it.getObject("child_rollback_failed_exceptions") as PGobject,
                         rollingBackException = it.getObject("rolling_back_exception") as PGobject?,
+                        executedStepInstances = it.getObject("executed_step_instances") as PGobject,
                     )
                 }
                 // After the second fetch, we found out that the record is no longer ready for
