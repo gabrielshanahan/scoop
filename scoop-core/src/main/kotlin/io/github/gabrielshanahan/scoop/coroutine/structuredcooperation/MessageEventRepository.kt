@@ -265,6 +265,7 @@ class MessageEventRepository(
             .run()
     }
 
+    @Suppress("LongParameterList")
     fun insertMessageEvent(
         connection: Connection,
         messageId: UUID,
@@ -275,13 +276,15 @@ class MessageEventRepository(
         cooperationLineage: List<UUID>,
         exception: CooperationFailure?,
         context: CooperationContext?,
+        childFailureHandlerIteration: Int? = null,
+        nextStep: Int? = null,
     ) {
         fluentJdbc
             .queryOn(connection)
             .update(
                 """
-                INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, exception, context) 
-                VALUES (:messageId, :messageEventType::message_event_type, :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :exception, :context)
+                INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, exception, context, child_failure_handler_iteration, next_step)
+                VALUES (:messageId, :messageEventType::message_event_type, :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :exception, :context, :childFailureHandlerIteration, :nextStep)
                 """
                     .trimIndent()
             )
@@ -299,6 +302,8 @@ class MessageEventRepository(
                 "context",
                 context?.takeIf { it.isNotEmpty() }?.let { jsonbHelper.toPGobject(it) },
             )
+            .namedParam("childFailureHandlerIteration", childFailureHandlerIteration)
+            .namedParam("nextStep", nextStep)
             .run()
     }
 
@@ -622,6 +627,15 @@ class MessageEventRepository(
      * @param payload The message payload
      * @param createdAt When the message was originally created
      * @param step The last step that was suspended (null if not suspended yet)
+     * @param nextStep The index of the next step to execute (determined by [StepResult]), or null
+     *   if the saga completed
+     * @param suspendedAt The timestamp of the last SUSPENDED event, or null if the saga hasn't been
+     *   suspended yet. Each event loop tick produces EMITTED and SUSPENDED events with monotonic
+     *   timestamps, so this timestamp identifies which tick produced which emissions — enabling
+     *   correct rollback scoping and child continuation matching. See
+     *   [insertRollbackEmittedEventsForStep] and [startContinuationsForCoroutine] for usage
+     * @param childFailureHandlerIteration The iteration counter for the child failure handler, or
+     *   null if not in a child failure handling context
      * @param latestScopeContext Under certain conditions, the context from the second-to-last
      *   persisted message event. See doc comment of [finalSelect] for an explanation.
      * @param latestContext The context from the last persisted message event
@@ -639,6 +653,9 @@ class MessageEventRepository(
         val payload: PGobject,
         val createdAt: OffsetDateTime,
         val step: String?,
+        val nextStep: Int?,
+        val suspendedAt: java.time.Instant?,
+        val childFailureHandlerIteration: Int?,
         val latestScopeContext: PGobject?,
         val latestContext: PGobject?,
         val childRolledBackExceptions: PGobject,
@@ -729,6 +746,11 @@ class MessageEventRepository(
                             @Suppress("UNCHECKED_CAST")
                             (it.getArray("cooperation_lineage").array as Array<UUID>).toList(),
                         step = it.getString("step"),
+                        nextStep = it.getObject("next_step") as Int?,
+                        suspendedAt =
+                            it.getTimestamp("suspended_at")?.toInstant(),
+                        childFailureHandlerIteration =
+                            it.getObject("child_failure_handler_iteration") as Int?,
                         latestScopeContext = it.getObject("latest_scope_context") as PGobject?,
                         latestContext = it.getObject("latest_context") as PGobject?,
                         childRolledBackExceptions =

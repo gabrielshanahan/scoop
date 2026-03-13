@@ -135,7 +135,7 @@ val latestSuspended =
     candidateSeens.appendAs(
         "latest_suspended",
         """
-        SELECT DISTINCT ON (message_event.message_id) message_event.cooperation_lineage, message_event.step, message_event.context, message_event.created_at
+        SELECT DISTINCT ON (message_event.message_id) message_event.cooperation_lineage, message_event.step, message_event.child_failure_handler_iteration, message_event.next_step, message_event.context, message_event.created_at
         FROM message_event
         JOIN candidate_seens ON message_event.cooperation_lineage = candidate_seens.cooperation_lineage
         WHERE message_event.type = 'SUSPENDED'
@@ -473,6 +473,9 @@ fun finalSelect(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolea
                 message.*,
                 seen_for_processing.cooperation_lineage,
                 latest_suspended.step,
+                latest_suspended.next_step,
+                latest_suspended.child_failure_handler_iteration,
+                latest_suspended.created_at as suspended_at,
                 last_event.context as latest_context,
                 CASE
                     -- See the explanation above to understand the logic behind this weird-looking selection
