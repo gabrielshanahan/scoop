@@ -45,7 +45,7 @@ import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.Cooperati
  *
  * ## EventLoop Decision Making
  *
- * The EventLoop uses RollbackState with [LastSuspendedStep] to determine actions:
+ * The EventLoop uses RollbackState with [SuspensionState] to determine actions:
  * - **Gucci**: Continue normal execution
  * - **SuccessfullyRolledBackLastStep**: Continue rolling back previous steps
  * - **Children failed states**: Handle child failures (potentially triggering rollback, or
@@ -57,7 +57,7 @@ import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.Cooperati
  * original exceptions. If both original operation and rollback fail, the rollback failure becomes
  * the primary exception with the original as a cause.
  *
- * @see LastSuspendedStep for the execution progress component of saga state
+ * @see SuspensionState for the execution progress component of saga state
  */
 sealed interface RollbackState {
 

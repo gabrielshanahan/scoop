@@ -6,7 +6,7 @@ import io.github.gabrielshanahan.scoop.coroutine.context.emptyContext
 import io.github.gabrielshanahan.scoop.coroutine.continuation.Continuation
 import io.github.gabrielshanahan.scoop.coroutine.continuation.buildHappyPathContinuation
 import io.github.gabrielshanahan.scoop.coroutine.continuation.buildRollbackPathContinuation
-import io.github.gabrielshanahan.scoop.coroutine.eventloop.LastSuspendedStep
+import io.github.gabrielshanahan.scoop.coroutine.eventloop.SuspensionState
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.RollbackState
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.CooperationException
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.CooperationFailure
@@ -208,9 +208,9 @@ class EventLoop(
      * This method constructs a [CoroutineState] that captures where a saga is in its lifecycle. The
      * state consists of two key dimensions:
      *
-     * ### Execution Progress ([LastSuspendedStep])
+     * ### Execution Progress ([SuspensionState])
      * - **NotSuspendedYet**: Brand new saga that hasn't executed any steps yet
-     * - **SuspendedAfter(stepName)**: Saga that completed a step and is waiting to proceed
+     * - **SuspendedAfterStep(stepName)**: Saga that completed a step and is waiting to proceed
      *
      * ### Rollback Status ([RollbackState])
      * - **Gucci**: Everything is fine, proceeding normally
@@ -234,9 +234,9 @@ class EventLoop(
      *
      * These dimensions combine to determine what the saga should do next:
      * - **(NotSuspendedYet, Gucci)**: Execute the first step
-     * - **(SuspendedAfter, Gucci)**: Execute the next step
-     * - **(SuspendedAfter, SuccessfullyRolledBackLastStep)**: Continue rolling back
-     * - **(SuspendedAfter, ChildrenFailed...)**:
+     * - **(SuspendedAfterStep, Gucci)**: Execute the next step
+     * - **(SuspendedAfterStep, SuccessfullyRolledBackLastStep)**: Continue rolling back
+     * - **(SuspendedAfterStep, ChildrenFailed...)**:
      *   [Handle child failures][TransactionalStep.handleChildFailures] and potentially start
      *   rolling back (or failing the rollback if one is in progress)
      *
@@ -389,8 +389,8 @@ class EventLoop(
 
                 // From latest_suspended.step (the last SUSPENDED event) null means this is a
                 // brand new saga that hasn't executed any steps yet
-                if (result.step == null) LastSuspendedStep.NotSuspendedYet
-                else LastSuspendedStep.SuspendedAfter(result.step),
+                if (result.step == null) SuspensionState.NotSuspendedYet
+                else SuspensionState.SuspendedAfterStep(result.step),
 
                 // The cooperation lineage from the SEEN event for this saga. This lineage
                 // extends the parent's lineage and identifies this saga's position in the
@@ -608,7 +608,7 @@ class EventLoop(
  * The EventLoop uses this state to build the appropriate [Continuation] for resuming execution.
  *
  * @param message The message that triggered this saga instance
- * @param lastSuspendedStep The last step that completed, or [LastSuspendedStep.NotSuspendedYet] for
+ * @param suspensionState The last step that completed, or [SuspensionState.NotSuspendedYet] for
  *   new sagas
  * @param scopeIdentifier The cooperation scope this saga is running in
  * @param cooperationContext Shared context data (deadlines, cancellation tokens, custom data)
@@ -616,7 +616,7 @@ class EventLoop(
  */
 data class CoroutineState(
     val message: Message,
-    val lastSuspendedStep: LastSuspendedStep,
+    val suspensionState: SuspensionState,
     val scopeIdentifier: CooperationScopeIdentifier.Child,
     val cooperationContext: CooperationContext,
     val rollbackState: RollbackState,

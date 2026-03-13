@@ -6,7 +6,7 @@ import io.github.gabrielshanahan.scoop.coroutine.CoroutineState
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
 import io.github.gabrielshanahan.scoop.coroutine.TransactionalStep
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
-import io.github.gabrielshanahan.scoop.coroutine.eventloop.LastSuspendedStep
+import io.github.gabrielshanahan.scoop.coroutine.eventloop.SuspensionState
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ScopeCapabilities
 import io.github.gabrielshanahan.scoop.messaging.Message
 import java.sql.Connection
@@ -120,7 +120,7 @@ internal class RollbackPathContinuation(
  * - No actual work was persisted, so we're immediately done
  * - Creates continuation positioned after the last rollback step (completion)
  *
- * **Case 2: SuspendedAfter** - Rollback after some step(s) executed
+ * **Case 2: SuspendedAfterStep** - Rollback after some step(s) executed
  * - **Sub-case 2a**: Rollback just initiated (last step name has no rollback prefix/suffix)
  *     - Start with the "child rollback" sub-step for the failed step
  *     - Uses formula: `nextStepIdx = 2 * stepToRevertIdx + 1` (explained bellow)
@@ -166,8 +166,8 @@ internal fun DistributedCoroutine.buildRollbackPathContinuation(
     val rollbackSteps = buildRollbackSteps(rollingBackPrefix, rollingBackSuffix, scopeCapabilities)
 
     // Phase 3: Determine where to start continuation based on current saga state
-    return when (coroutineState.lastSuspendedStep) {
-        is LastSuspendedStep.NotSuspendedYet -> {
+    return when (coroutineState.suspensionState) {
+        is SuspensionState.NotSuspendedYet -> {
             // Case 1: Rollback before any step committed to database
             // Since no transaction was committed, no messages were emitted, no child handlers
             // were spawned, and there's nothing to roll back. Position after the last rollback
@@ -182,20 +182,20 @@ internal fun DistributedCoroutine.buildRollbackPathContinuation(
             )
         }
 
-        is LastSuspendedStep.SuspendedAfter -> {
+        is SuspensionState.SuspendedAfterStep -> {
             // Case 2: Rollback after one or more steps executed and committed
 
             // Extract the original step name by removing any rollback prefixes/suffixes
             // E.g., "Rollback of PaymentStep (rolling back child scopes)" → "PaymentStep"
-            val cleanLastSuspendedStepName =
-                coroutineState.lastSuspendedStep.stepName
+            val cleanSuspensionStateName =
+                coroutineState.suspensionState.stepName
                     .removePrefix(rollingBackPrefix)
                     .removeSuffix(rollingBackSuffix)
 
             // Find the index of the original step in the saga definition
-            val stepToRevert = steps.indexOfFirst { it.name == cleanLastSuspendedStepName }
+            val stepToRevert = steps.indexOfFirst { it.name == cleanSuspensionStateName }
 
-            check(stepToRevert > -1) { "Step $cleanLastSuspendedStepName was not found" }
+            check(stepToRevert > -1) { "Step $cleanSuspensionStateName was not found" }
 
             // Determine if rollback just started vs. rollback already in progress
             // Key insight: If the clean name equals the original name, then the suspended step
@@ -203,7 +203,7 @@ internal fun DistributedCoroutine.buildRollbackPathContinuation(
             // to rollback execution for the first time.
             // This could be determined directly in the "fetchCoroutineState" SQL by evaluating
             // "is ROLLING_BACK the last event that was written", but this works as well.
-            if (cleanLastSuspendedStepName == coroutineState.lastSuspendedStep.stepName) {
+            if (cleanSuspensionStateName == coroutineState.suspensionState.stepName) {
                 // Sub-case 2a: Rollback just started (normal step name, no rollback prefix/suffix)
                 // Need to start rollback for the failed step. Each original step becomes 2 rollback
                 // sub-steps, so we use the following formula to find the "child rollback" sub-step.
@@ -238,7 +238,7 @@ internal fun DistributedCoroutine.buildRollbackPathContinuation(
                 // Find the current rollback sub-step in the rollback sequence
                 val nextStepIdx =
                     rollbackSteps.indexOfFirst {
-                        it.name == coroutineState.lastSuspendedStep.stepName
+                        it.name == coroutineState.suspensionState.stepName
                     }
 
                 if (rollbackSteps[nextStepIdx] == rollbackSteps.first()) {

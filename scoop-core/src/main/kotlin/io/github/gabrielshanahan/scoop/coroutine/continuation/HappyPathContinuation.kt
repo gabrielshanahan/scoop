@@ -4,7 +4,7 @@ import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.CoroutineState
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
-import io.github.gabrielshanahan.scoop.coroutine.eventloop.LastSuspendedStep
+import io.github.gabrielshanahan.scoop.coroutine.eventloop.SuspensionState
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ScopeCapabilities
 import java.sql.Connection
 
@@ -63,8 +63,8 @@ internal fun DistributedCoroutine.buildHappyPathContinuation(
     coroutineState: CoroutineState,
     scopeCapabilities: ScopeCapabilities,
 ) =
-    when (coroutineState.lastSuspendedStep) {
-        is LastSuspendedStep.NotSuspendedYet -> {
+    when (coroutineState.suspensionState) {
+        is SuspensionState.NotSuspendedYet -> {
             // Case 1: Not suspended yet - Create a continuation to execute the first step
             HappyPathContinuation(
                 connection,
@@ -76,12 +76,12 @@ internal fun DistributedCoroutine.buildHappyPathContinuation(
             )
         }
 
-        is LastSuspendedStep.SuspendedAfter -> {
+        is SuspensionState.SuspendedAfterStep -> {
             val suspendedStepIdx =
-                steps.indexOfFirst { it.name == coroutineState.lastSuspendedStep.stepName }
+                steps.indexOfFirst { it.name == coroutineState.suspensionState.stepName }
 
             check(suspendedStepIdx > -1) {
-                "Step ${coroutineState.lastSuspendedStep} was not found"
+                "Step ${coroutineState.suspensionState} was not found"
             }
 
             if (steps[suspendedStepIdx] == steps.last()) {
