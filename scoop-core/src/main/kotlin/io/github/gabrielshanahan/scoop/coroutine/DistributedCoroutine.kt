@@ -1,7 +1,22 @@
 package io.github.gabrielshanahan.scoop.coroutine
 
+import io.github.gabrielshanahan.scoop.coroutine.eventloop.ChildFailureHandlerIteration
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.strategy.EventLoopStrategy
 import io.github.gabrielshanahan.scoop.messaging.Message
+
+/**
+ * Result returned by [TransactionalStep.invoke] to control loop execution.
+ * - [Continue]: The step completed normally; the saga advances to the next step.
+ * - [Repeat]: The step should be re-executed (equivalent to GoTo(ownIndex)).
+ * - [GoTo]: Jump to a specific step by index.
+ */
+sealed interface NextStep {
+    data object Continue : NextStep
+
+    data object Repeat : NextStep
+
+    data class GoTo(val stepIndex: Int) : NextStep
+}
 
 /**
  * Represents a single step in a distributed saga, which is represented as a [DistributedCoroutine].
@@ -71,8 +86,10 @@ interface TransactionalStep {
      * @param scope The cooperation scope, providing access to message emission and context
      * @param message The message that triggered this saga (for the first step) or that caused this
      *   step to resume
+     * @param stepIteration How many times this step has run consecutively (0 on first run)
+     * @return [NextStep] indicating whether to continue to the next step, repeat, or goto
      */
-    fun invoke(scope: CooperationScope, message: Message)
+    fun invoke(scope: CooperationScope, message: Message, stepIteration: Int): NextStep
 
     /**
      * Defines the compensating action for this step during rollback.
@@ -86,8 +103,18 @@ interface TransactionalStep {
      * @param scope The cooperation scope (same as during [invoke])
      * @param message The original message that triggered this step
      * @param throwable The exception that caused the rollback to begin
+     * @param stepIteration The consecutive run count of the step being rolled back
+     * @param childFailureHandlerIteration Whether this rollback is for the step's own invocation
+     *   ([ChildFailureHandlerIteration.NoChildFailure]) or for a specific child-failure-handler run
+     *   ([ChildFailureHandlerIteration.HandlerIteration])
      */
-    fun rollback(scope: CooperationScope, message: Message, throwable: Throwable) = Unit
+    fun rollback(
+        scope: CooperationScope,
+        message: Message,
+        throwable: Throwable,
+        stepIteration: Int,
+        childFailureHandlerIteration: ChildFailureHandlerIteration,
+    ) = Unit
 
     /**
      * Handles failures from child message handlers spawned by this step.
@@ -116,16 +143,27 @@ interface TransactionalStep {
      *
      * **Future improvement**: A cleaner approach would be to have a separate rollback step for
      * anything emitted from [handleChildFailures], but this would require supporting a dynamic
-     * number "semi-steps" between each step (has [handleChildFailures] can run multiple times),
+     * number of "semi-steps" between each step (as [handleChildFailures] can run multiple times),
      * which is definitely doable, but out of scope for a rudimentary POC.
      *
      * @param scope The cooperation scope
      * @param message The original message that triggered this step
      * @param throwable The exception from the child handler that failed
+     * @param stepIteration The current consecutive run count of the parent step
+     * @param childFailureHandlerIteration The iteration counter for this handler invocation
+     * @param nextStep The [NextStep] that [invoke] returned for this step
+     * @return [NextStep] controlling what step executes next (overrides invoke's result)
      * @throws Throwable If the error should cause this saga to roll back
      */
-    fun handleChildFailures(scope: CooperationScope, message: Message, throwable: Throwable): Unit =
-        throw throwable
+    @Suppress("LongParameterList")
+    fun handleChildFailures(
+        scope: CooperationScope,
+        message: Message,
+        throwable: Throwable,
+        stepIteration: Int,
+        childFailureHandlerIteration: Int,
+        nextStep: NextStep,
+    ): NextStep = throw throwable
 }
 
 /**

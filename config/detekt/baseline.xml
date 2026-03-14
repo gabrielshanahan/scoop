@@ -4,6 +4,8 @@
   <CurrentIssues>
     <ID>ForbiddenComment:PostgresMessageQueue.kt$PostgresMessageQueue$// TODO: config</ID>
     <ID>ForbiddenComment:RollbackPathContinuation.kt$// TODO: Config</ID>
+    <ID>LargeClass:GoToTest.kt$GoToTest : StructuredCooperationTest</ID>
+    <ID>LargeClass:LoopTest.kt$LoopTest : StructuredCooperationTest</ID>
     <ID>LargeClass:RollbackPathTest.kt$RollbackPathTest : StructuredCooperationTest</ID>
     <ID>LongMethod:CancellationTest.kt$CancellationTest$@Test fun `cancellation after everything has finished running has no effect`()</ID>
     <ID>LongMethod:CancellationTest.kt$CancellationTest$@Test fun `cancellation works`()</ID>
@@ -19,6 +21,7 @@
     <ID>LongMethod:MessageEventsTest.kt$MessageEventsTest$@Test fun `multiple handler instances should coordinate using message events for multiple messages`()</ID>
     <ID>LongMethod:MessageEventsTest.kt$MessageEventsTest$@Test fun `should follow complete message event writing sequence on failed processing`()</ID>
     <ID>LongMethod:PendingCoroutineRunSql.kt$fun candidateSeensWaitingToBeProcessed(eventLoopStrategy: EventLoopStrategy)</ID>
+    <ID>LongMethod:PendingCoroutineRunSql.kt$fun finalSelect(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolean = false)</ID>
     <ID>LongMethod:ReturnValueTest.kt$ReturnValueTest$@Test fun `multiple child handlers can each store return values`()</ID>
     <ID>LongMethod:PendingCoroutineRunSqlTest.kt$PendingCoroutineRunSqlTest.ChildRollingBacks$@Test fun `picks up child rolling backs and their terminations`()</ID>
     <ID>LongMethod:RollbackPathContinuation.kt$internal fun DistributedCoroutine.buildRollbackPathContinuation( connection: Connection, coroutineState: CoroutineState, scopeCapabilities: ScopeCapabilities, ): RollbackPathContinuation</ID>

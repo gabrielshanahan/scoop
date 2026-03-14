@@ -5,6 +5,7 @@ import io.github.gabrielshanahan.scoop.coroutine.StructuredCooperationTest
 import io.github.gabrielshanahan.scoop.coroutine.continuation.ContinuationIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.continuation.ROLLING_BACK_CHILD_SCOPES_STEP_SUFFIX
 import io.github.gabrielshanahan.scoop.coroutine.continuation.ROLLING_BACK_PREFIX
+import io.github.gabrielshanahan.scoop.coroutine.eventloop.ChildFailureHandlerIteration
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.strategy.EventLoopStrategy
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.strategy.StandardEventLoopStrategy
 import io.github.gabrielshanahan.scoop.messaging.Message
@@ -38,7 +39,12 @@ class PendingCoroutineRunSqlTest : StructuredCooperationTest() {
     private val childHandler4 = "child-handler-4"
 
     fun DistributedCoroutineIdentifier.step(stepName: String) =
-        ContinuationIdentifier(stepName, this)
+        ContinuationIdentifier(
+            stepName = stepName,
+            stepIteration = 0,
+            childFailureHandlerIteration = ChildFailureHandlerIteration.NoChildFailure,
+            distributedCoroutineIdentifier = this,
+        )
 
     fun <T> List<T>.isEqualToInAnyOrder(other: List<T>, message: String) =
         Assertions.assertTrue(containsAll(other) && other.containsAll(this), message)
