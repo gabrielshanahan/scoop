@@ -3,7 +3,9 @@ package io.github.gabrielshanahan.scoop.coroutine.builder
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScope
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutineIdentifier
+import io.github.gabrielshanahan.scoop.coroutine.NextStep
 import io.github.gabrielshanahan.scoop.coroutine.TransactionalStep
+import io.github.gabrielshanahan.scoop.coroutine.eventloop.ChildFailureHandlerIteration
 import io.github.gabrielshanahan.scoop.coroutine.eventloop.strategy.EventLoopStrategy
 import io.github.gabrielshanahan.scoop.messaging.Message
 
@@ -60,6 +62,14 @@ class SagaBuilder(val name: String, val eventLoopStrategy: EventLoopStrategy) {
 
     val steps: MutableList<TransactionalStep> = mutableListOf()
 
+    /**
+     * Adds a step with simplified lambdas that use default behavior for advanced parameters. The
+     * invoke lambda ignores [stepIteration][TransactionalStep.invoke] and always returns
+     * [NextStep.Continue]. The rollback lambda ignores [stepIteration][TransactionalStep.rollback]
+     * and [childFailureHandlerIteration][TransactionalStep.rollback]. The handleChildFailures
+     * lambda ignores [childFailureHandlerIteration][TransactionalStep.handleChildFailures] and
+     * [nextStep][TransactionalStep.handleChildFailures].
+     */
     fun step(
         name: String,
         invoke: (CooperationScope, Message) -> Unit,
@@ -71,24 +81,52 @@ class SagaBuilder(val name: String, val eventLoopStrategy: EventLoopStrategy) {
                 override val name: String
                     get() = name
 
-                override fun invoke(scope: CooperationScope, message: Message) =
+                override fun invoke(
+                    scope: CooperationScope,
+                    message: Message,
+                    stepIteration: Int,
+                ): NextStep {
                     invoke(scope, message)
+                    return NextStep.Continue
+                }
 
                 override fun rollback(
                     scope: CooperationScope,
                     message: Message,
                     throwable: Throwable,
+                    stepIteration: Int,
+                    childFailureHandlerIteration: ChildFailureHandlerIteration,
                 ) =
                     rollback?.invoke(scope, message, throwable)
-                        ?: super.rollback(scope, message, throwable)
+                        ?: super.rollback(
+                            scope,
+                            message,
+                            throwable,
+                            stepIteration,
+                            childFailureHandlerIteration,
+                        )
 
                 override fun handleChildFailures(
                     scope: CooperationScope,
                     message: Message,
                     throwable: Throwable,
-                ) =
-                    handleChildFailures?.invoke(scope, message, throwable)
-                        ?: super.handleChildFailures(scope, message, throwable)
+                    stepIteration: Int,
+                    childFailureHandlerIteration: Int,
+                    nextStep: NextStep,
+                ): NextStep =
+                    if (handleChildFailures != null) {
+                        handleChildFailures.invoke(scope, message, throwable)
+                        nextStep
+                    } else {
+                        super.handleChildFailures(
+                            scope,
+                            message,
+                            throwable,
+                            stepIteration,
+                            childFailureHandlerIteration,
+                            nextStep,
+                        )
+                    }
             }
         )
     }
@@ -104,6 +142,120 @@ class SagaBuilder(val name: String, val eventLoopStrategy: EventLoopStrategy) {
 
     fun step(invoke: (CooperationScope, Message) -> Unit) =
         step(steps.size.toString(), invoke, null, null)
+
+    /**
+     * Adds a stepIteration-aware step that can control loop execution via [NextStep].
+     *
+     * The invoke lambda receives the current stepIteration and returns [NextStep.Continue] to
+     * advance to the next step, [NextStep.Repeat] to re-execute this step, or [NextStep.GoTo] to
+     * jump to a specific step index.
+     */
+    fun step(
+        name: String,
+        invoke: (scope: CooperationScope, message: Message, stepIteration: Int) -> NextStep,
+        rollback:
+            ((
+                scope: CooperationScope,
+                message: Message,
+                throwable: Throwable,
+                stepIteration: Int,
+                childFailureHandlerIteration: ChildFailureHandlerIteration,
+            ) -> Unit)? =
+            null,
+        handleChildFailures:
+            ((
+                scope: CooperationScope,
+                message: Message,
+                throwable: Throwable,
+                stepIteration: Int,
+                childFailureHandlerIteration: Int,
+                nextStep: NextStep,
+            ) -> NextStep)? =
+            null,
+    ) {
+        steps.add(
+            object : TransactionalStep {
+                override val name: String
+                    get() = name
+
+                override fun invoke(
+                    scope: CooperationScope,
+                    message: Message,
+                    stepIteration: Int,
+                ): NextStep = invoke(scope, message, stepIteration)
+
+                override fun rollback(
+                    scope: CooperationScope,
+                    message: Message,
+                    throwable: Throwable,
+                    stepIteration: Int,
+                    childFailureHandlerIteration: ChildFailureHandlerIteration,
+                ) =
+                    rollback?.invoke(
+                        scope,
+                        message,
+                        throwable,
+                        stepIteration,
+                        childFailureHandlerIteration,
+                    )
+                        ?: super.rollback(
+                            scope,
+                            message,
+                            throwable,
+                            stepIteration,
+                            childFailureHandlerIteration,
+                        )
+
+                override fun handleChildFailures(
+                    scope: CooperationScope,
+                    message: Message,
+                    throwable: Throwable,
+                    stepIteration: Int,
+                    childFailureHandlerIteration: Int,
+                    nextStep: NextStep,
+                ): NextStep =
+                    handleChildFailures?.invoke(
+                        scope,
+                        message,
+                        throwable,
+                        stepIteration,
+                        childFailureHandlerIteration,
+                        nextStep,
+                    )
+                        ?: super.handleChildFailures(
+                            scope,
+                            message,
+                            throwable,
+                            stepIteration,
+                            childFailureHandlerIteration,
+                            nextStep,
+                        )
+            }
+        )
+    }
+
+    fun step(
+        invoke: (scope: CooperationScope, message: Message, stepIteration: Int) -> NextStep,
+        rollback:
+            ((
+                scope: CooperationScope,
+                message: Message,
+                throwable: Throwable,
+                stepIteration: Int,
+                childFailureHandlerIteration: ChildFailureHandlerIteration,
+            ) -> Unit)? =
+            null,
+        handleChildFailures:
+            ((
+                scope: CooperationScope,
+                message: Message,
+                throwable: Throwable,
+                stepIteration: Int,
+                childFailureHandlerIteration: Int,
+                nextStep: NextStep,
+            ) -> NextStep)? =
+            null,
+    ) = step(steps.size.toString(), invoke, rollback, handleChildFailures)
 
     fun build(): DistributedCoroutine =
         DistributedCoroutine(DistributedCoroutineIdentifier(name), steps, eventLoopStrategy)

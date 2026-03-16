@@ -135,7 +135,7 @@ val latestSuspended =
     candidateSeens.appendAs(
         "latest_suspended",
         """
-        SELECT DISTINCT ON (message_event.message_id) message_event.cooperation_lineage, message_event.step, message_event.context, message_event.created_at
+        SELECT DISTINCT ON (message_event.message_id) message_event.cooperation_lineage, message_event.step, message_event.child_failure_handler_iteration, message_event.next_step, message_event.context, message_event.created_at
         FROM message_event
         JOIN candidate_seens ON message_event.cooperation_lineage = candidate_seens.cooperation_lineage
         WHERE message_event.type = 'SUSPENDED'
@@ -160,7 +160,14 @@ val childEmissionsInLatestStep =
         JOIN latest_suspended
             ON emissions.cooperation_lineage = latest_suspended.cooperation_lineage
         WHERE emissions.type = 'EMITTED'
-            AND emissions.step = latest_suspended.step
+            AND emissions.created_at < latest_suspended.created_at
+            AND NOT EXISTS (
+                SELECT 1 FROM message_event mid
+                WHERE mid.cooperation_lineage = emissions.cooperation_lineage
+                  AND mid.type = 'SUSPENDED'
+                  AND mid.created_at > emissions.created_at
+                  AND mid.created_at < latest_suspended.created_at
+            )
         """
             .trimIndent(),
     )
@@ -226,7 +233,15 @@ val childRollbackEmissionsInLatestStep =
         JOIN latest_suspended
             ON rollback_emissions.cooperation_lineage = latest_suspended.cooperation_lineage
         WHERE rollback_emissions.type = 'ROLLBACK_EMITTED'
-            AND rollback_emissions.step = latest_suspended.step
+            AND rollback_emissions.step IS NOT NULL
+            AND rollback_emissions.created_at < latest_suspended.created_at
+            AND NOT EXISTS (
+                SELECT 1 FROM message_event mid
+                WHERE mid.cooperation_lineage = rollback_emissions.cooperation_lineage
+                  AND mid.type = 'SUSPENDED'
+                  AND mid.created_at > rollback_emissions.created_at
+                  AND mid.created_at < latest_suspended.created_at
+            )
         """
             .trimIndent(),
     )
@@ -473,6 +488,9 @@ fun finalSelect(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolea
                 message.*,
                 seen_for_processing.cooperation_lineage,
                 latest_suspended.step,
+                latest_suspended.next_step,
+                latest_suspended.child_failure_handler_iteration,
+                latest_suspended.created_at as suspended_at,
                 last_event.context as latest_context,
                 CASE
                     -- See the explanation above to understand the logic behind this weird-looking selection
@@ -500,7 +518,23 @@ fun finalSelect(eventLoopStrategy: EventLoopStrategy, secondRunAfterLock: Boolea
                     WHERE message_event.type = 'ROLLING_BACK'
                       AND exception IS NOT NULL
                     LIMIT 1
-                ) AS rolling_back_exception
+                ) AS rolling_back_exception,
+                (
+                    SELECT COALESCE(
+                        JSON_AGG(
+                            JSON_BUILD_OBJECT(
+                                'step', me.step,
+                                'child_failure_handler_iteration', me.child_failure_handler_iteration,
+                                'suspended_at', me.created_at
+                            ) ORDER BY me.created_at DESC
+                        ),
+                        '[]'::json
+                    )
+                    FROM message_event me
+                    JOIN seen_for_processing ON me.cooperation_lineage = seen_for_processing.cooperation_lineage
+                    WHERE me.type = 'SUSPENDED'
+                      AND me.step IS NOT NULL
+                ) AS executed_step_instances
             FROM seen_for_processing
             LEFT JOIN latest_suspended ON seen_for_processing.cooperation_lineage = latest_suspended.cooperation_lineage
             JOIN (SELECT * FROM last_two_events LIMIT 1) last_event ON TRUE

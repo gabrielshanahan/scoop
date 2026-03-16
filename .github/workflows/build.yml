@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [master]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -35,17 +39,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Build scoop-core
-        run: ./gradlew :scoop-core:build
-
-      - name: Build scoop-quarkus
-        run: ./gradlew :scoop-quarkus:build
+      - name: Build
+        run: ./gradlew build
         env:
           QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://localhost:5432/scoop
           QUARKUS_DATASOURCE_REACTIVE_URL: postgresql://localhost:5432/scoop
           QUARKUS_DATASOURCE_USERNAME: scoop
           QUARKUS_DATASOURCE_PASSWORD: scoop
           CI_TIMEOUT_MULTIPLIER: 3
+        timeout-minutes: 10
 
       - name: Verify publishable artifacts
         run: ./gradlew publishToMavenLocal
+        timeout-minutes: 5
