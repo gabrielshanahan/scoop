@@ -47,7 +47,7 @@ Add the core dependency:
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("io.github.gabrielshanahan:scoop-core:0.1.1")
+    implementation("io.github.gabrielshanahan:scoop-core:0.2.0")
 }
 ```
 
@@ -56,7 +56,7 @@ dependencies {
 <dependency>
     <groupId>io.github.gabrielshanahan</groupId>
     <artifactId>scoop-core</artifactId>
-    <version>0.1.1</version> <!-- scoop-version -->
+    <version>0.2.0</version> <!-- scoop-version -->
 </dependency>
 ```
 
@@ -92,7 +92,7 @@ Add the Quarkus module (it transitively includes `scoop-core`):
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("io.github.gabrielshanahan:scoop-quarkus:0.1.1")
+    implementation("io.github.gabrielshanahan:scoop-quarkus:0.2.0")
 }
 ```
 
@@ -101,7 +101,7 @@ dependencies {
 <dependency>
     <groupId>io.github.gabrielshanahan</groupId>
     <artifactId>scoop-quarkus</artifactId>
-    <version>0.1.1</version> <!-- scoop-version -->
+    <version>0.2.0</version> <!-- scoop-version -->
 </dependency>
 ```
 
