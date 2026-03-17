@@ -1,5 +1,5 @@
 [versions]
-kotlin = "2.1.20"              # checked: 2026-03-10
+kotlin = "2.3.20"              # checked: 2026-03-10
 quarkus = "3.24.5"             # checked: 2026-03-10
 ktfmt = "0.25.0"               # checked: 2026-03-10
 detekt = "1.23.8"              # checked: 2026-03-10
