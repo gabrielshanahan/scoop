@@ -2,6 +2,7 @@ package io.github.gabrielshanahan.scoop.coroutine.structuredcooperation
 
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScope
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
+import io.github.gabrielshanahan.scoop.coroutine.Handler
 import io.github.gabrielshanahan.scoop.coroutine.VariableName
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
 import io.github.gabrielshanahan.scoop.coroutine.context.emptyContext
@@ -142,22 +143,27 @@ interface ScopeCapabilities {
      *
      * @param scope The cooperation scope retrieving return values
      * @param variableName The identifier used when storing the return values
-     * @return Map of handler name to return value data
+     * @param handlerRegistry A function that maps handler name strings to Handler objects
+     * @return Map of handler to return value data
      */
-    fun getReturnValues(scope: CooperationScope, variableName: VariableName): Map<String, PGobject>
+    fun getReturnValues(
+        scope: CooperationScope,
+        variableName: VariableName,
+        handlerRegistry: (String) -> Handler<*>,
+    ): Map<Handler<*>, PGobject>
 
     /**
-     * Retrieves a specific return value from a direct child by handler name.
+     * Retrieves a specific return value from a direct child by handler.
      *
      * @param scope The cooperation scope retrieving the return value
      * @param variableName The identifier used when storing the return value
-     * @param handlerName The name of the specific handler
+     * @param handler The specific handler
      * @return The return value data, or null if not found
      */
     fun getReturnValue(
         scope: CooperationScope,
         variableName: VariableName,
-        handlerName: String,
+        handler: Handler<*>,
     ): PGobject?
 }
 
@@ -397,22 +403,24 @@ class Capabilities(
     override fun getReturnValues(
         scope: CooperationScope,
         variableName: VariableName,
-    ): Map<String, PGobject> =
+        handlerRegistry: (String) -> Handler<*>,
+    ): Map<Handler<*>, PGobject> =
         returnValueRepository.getReturnValues(
             scope.connection,
             scope.scopeIdentifier.cooperationLineage,
             variableName,
+            handlerRegistry,
         )
 
     override fun getReturnValue(
         scope: CooperationScope,
         variableName: VariableName,
-        handlerName: String,
+        handler: Handler<*>,
     ): PGobject? =
         returnValueRepository.getReturnValue(
             scope.connection,
             scope.scopeIdentifier.cooperationLineage,
             variableName,
-            handlerName,
+            handler,
         )
 }

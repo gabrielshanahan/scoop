@@ -1,6 +1,8 @@
 package io.github.gabrielshanahan.scoop.coroutine.structuredcooperation
 
+import io.github.gabrielshanahan.scoop.coroutine.Handler
 import io.github.gabrielshanahan.scoop.coroutine.VariableName
+import io.github.gabrielshanahan.scoop.coroutine.handlerName
 import io.github.gabrielshanahan.scoop.coroutine.serializedValue
 import java.sql.Connection
 import java.sql.SQLException
@@ -77,13 +79,15 @@ class ReturnValueRepository(private val fluentJdbc: FluentJdbc) {
      * @param connection Database connection
      * @param parentLineage The cooperation lineage of the parent scope
      * @param variableName The identifier for the return values
-     * @return Map of handler name to return value, empty if no return values found
+     * @param handlerRegistry A function that maps handler name strings to Handler objects
+     * @return Map of handler to return value, empty if no return values found
      */
     fun getReturnValues(
         connection: Connection,
         parentLineage: List<UUID>,
         variableName: VariableName,
-    ): Map<String, PGobject> {
+        handlerRegistry: (String) -> Handler<*>,
+    ): Map<Handler<*>, PGobject> {
         val lineageArray = connection.createArrayOf("uuid", parentLineage.toTypedArray())
         val childCardinality = parentLineage.size + 1
 
@@ -104,25 +108,25 @@ class ReturnValueRepository(private val fluentJdbc: FluentJdbc) {
             .listResult { resultSet ->
                 val handlerName = resultSet.getString("handler_name")
                 val value = resultSet.getObject("value") as PGobject
-                handlerName to value
+                handlerRegistry(handlerName) to value
             }
             .toMap()
     }
 
     /**
-     * Retrieves a specific return value from a direct child by handler name.
+     * Retrieves a specific return value from a direct child by handler.
      *
      * @param connection Database connection
      * @param parentLineage The cooperation lineage of the parent scope
      * @param variableName The identifier for the return value
-     * @param handlerName The name of the specific handler
+     * @param handler The specific handler
      * @return The return value as a JSONB object, or null if not found
      */
     fun getReturnValue(
         connection: Connection,
         parentLineage: List<UUID>,
         variableName: VariableName,
-        handlerName: String,
+        handler: Handler<*>,
     ): PGobject? {
         val lineageArray = connection.createArrayOf("uuid", parentLineage.toTypedArray())
         val childCardinality = parentLineage.size + 1
@@ -140,7 +144,7 @@ class ReturnValueRepository(private val fluentJdbc: FluentJdbc) {
                     .trimIndent()
             )
             .namedParam("variableName", variableName.serializedValue)
-            .namedParam("handlerName", handlerName)
+            .namedParam("handlerName", handler.handlerName)
             .namedParam("parentLineage", lineageArray)
             .namedParam("childCardinality", childCardinality)
             .firstResult { resultSet -> resultSet.getObject("value") as PGobject }
