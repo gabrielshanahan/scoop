@@ -226,16 +226,20 @@ interface CooperationScope {
      * children's return values are guaranteed to be present.
      *
      * @param variableName The identifier used when storing the return values
-     * @return Map of handler name to return value data
+     * @param handlerRegistry A function that maps handler name strings to Handler objects
+     * @return Map of handler to return value data
      */
-    fun getReturnValues(variableName: VariableName): Map<String, PGobject>
+    fun getReturnValues(
+        variableName: VariableName,
+        handlerRegistry: (String) -> Handler<*>,
+    ): Map<Handler<*>, PGobject>
 
     /**
-     * Retrieves a specific return value from a direct child by handler name.
+     * Retrieves a specific return value from a direct child by handler.
      *
      * @param variableName The identifier used when storing the return value
-     * @param handlerName The name of the specific handler
+     * @param handler The specific handler
      * @return The return value data, or null if not found
      */
-    fun getReturnValue(variableName: VariableName, handlerName: String): PGobject?
+    fun getReturnValue(variableName: VariableName, handler: Handler<*>): PGobject?
 }

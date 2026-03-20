@@ -29,6 +29,7 @@ I do recommend you [read the articles](#how-does-it-solve-the-problem) first.
   - [Project Structure](#project-structure)
   - [The state of Scoop](#the-state-of-scoop)
   - [Loops and control flow](#loops-and-control-flow)
+  - [Typed utilities](#typed-utilities)
   - [Data model](#data-model)
   - [Important components and high-level flow](#important-components-and-high-level-flow)
 - [Glossary of terms](#glossary-of-terms)
@@ -234,6 +235,7 @@ Then, take a look at the SQL and `EventLoopStrategy`:
   provides a placeholder solution of the ["who is listening" problem](https://developer.porn/posts/implementing-structured-cooperation/#building-and-maintaining-a-handler-topology) in Scoop.
 
 Finally, learn about individual functionalities:
+* [typed utilities](#typed-utilities) (`Topic`, `Handler`, `Action`) — type-safe identifiers for topics, handlers, and actions with return values,
 * [loops and control flow](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/DistributedCoroutine.kt) (`NextStep`),
 * cancellation requests (search for `CANCELLATION_REQUESTED`. Don't confuse this with [cancellation tokens](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CancellationToken.kt) bellow),
 * [cooperation context](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/context/CooperationContext.kt),
@@ -336,6 +338,61 @@ A few things to note:
 - Structured cooperation is fully respected during loops. Each time a step executes, if it emits messages, the saga suspends and waits for all child handlers to finish before the next iteration begins. This means that even inside a loop, you get the same transactional guarantees as anywhere else.
 - `stepIteration` resets to 0 whenever a *different* step starts executing. It only tracks consecutive re-executions of the same step.
 - When a saga that used loops needs to roll back, Scoop rolls back each *instance* of each step—so if a step ran 3 times via `Repeat`, its `rollback` is called 3 times (once per iteration, in reverse order), each time receiving the corresponding `stepIteration` value. The `childFailureHandlerIteration` parameter distinguishes rollbacks of the step's own invocation from rollbacks of emissions made during a `handleChildFailures` call.
+
+### Typed utilities
+
+Scoop provides a set of type-safe abstractions that replace raw string identifiers for topics, handlers, and actions. These are defined in `scoop-core` under `io.github.gabrielshanahan.scoop.coroutine`.
+
+**[Topic\<P>](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/Topic.kt)** — A type-safe topic identifier. The type parameter `P` represents the payload type. Define topics as named objects:
+
+```kotlin
+object OrderTopic : Topic<OrderPayload>()
+```
+
+**[Handler\<P>](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/Handler.kt)** — Binds a handler name, its topic, and its implementation into a single type-safe object. The handler name is derived from the class name:
+
+```kotlin
+object OrderProcessor : Handler<OrderPayload>(OrderTopic) {
+    override fun implementation() = saga(handlerRegistry.eventLoopStrategy()) {
+        step { scope, message -> /* ... */ }
+    }
+}
+```
+
+The `Handler.saga(eventLoopStrategy) {}` [extension](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/builder/SagaBuilderExtensions.kt) automatically uses the handler's class name as the saga name, so you don't need to repeat it.
+
+**Subscribing handlers** — Use the [`subscribe(handler)`](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/messaging/MessageQueueExtensions.kt) extension to register a handler with the message queue in one call:
+
+```kotlin
+messageQueue.subscribe(OrderProcessor)  // extracts topic and implementation from the handler
+```
+
+**[Action\<I, O>](scoop-core/src/main/kotlin/io/github/gabrielshanahan/scoop/coroutine/Action.kt)** — A handler that produces a return value. Actions use `ActionTopic<P>` (a topic whose payload is wrapped in `ActionInput<P>`) and provide a `storeActionResult` convenience method:
+
+```kotlin
+object ComputePrice : Action<OrderPayload, PriceResult>(ComputePriceTopic) {
+    override val jsonbHelper = /* injected */
+    override fun implementation() = saga(handlerRegistry.eventLoopStrategy()) {
+        step { scope, message ->
+            val input = jsonbHelper.parseActionInput<OrderPayload>(message.payload)
+            val price = calculatePrice(input.payload)
+            scope.storeActionResult(input, price)
+        }
+    }
+}
+```
+
+**Return values** — Parent sagas retrieve child return values using `Handler<*>` objects instead of raw strings:
+
+```kotlin
+// Retrieve all children's return values for a given variable name
+val results: Map<Handler<*>, PGobject> = scope.getReturnValues(MyVariable, handlerRegistry)
+
+// Retrieve a specific child's return value
+val price: PGobject? = scope.getReturnValue(MyVariable, ComputePrice)
+```
+
+The `handlerRegistry` parameter is a `(String) -> Handler<*>` function that maps handler name strings (as stored in the database) back to `Handler` objects.
 
 ### Data model
 From a data perspective, Scoop consists of two tables: `message` and `message_events`.

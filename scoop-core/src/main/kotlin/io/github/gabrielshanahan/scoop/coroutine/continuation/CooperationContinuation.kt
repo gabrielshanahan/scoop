@@ -3,6 +3,7 @@ package io.github.gabrielshanahan.scoop.coroutine.continuation
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScope
 import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
+import io.github.gabrielshanahan.scoop.coroutine.Handler
 import io.github.gabrielshanahan.scoop.coroutine.NextStep
 import io.github.gabrielshanahan.scoop.coroutine.TransactionalStep
 import io.github.gabrielshanahan.scoop.coroutine.VariableName
@@ -224,11 +225,14 @@ internal abstract class BaseCooperationContinuation(
     override fun storeReturnValue(variableName: VariableName, value: PGobject): Unit =
         scopeCapabilities.storeReturnValue(this, variableName, value)
 
-    override fun getReturnValues(variableName: VariableName): Map<String, PGobject> =
-        scopeCapabilities.getReturnValues(this, variableName)
+    override fun getReturnValues(
+        variableName: VariableName,
+        handlerRegistry: (String) -> Handler<*>,
+    ): Map<Handler<*>, PGobject> =
+        scopeCapabilities.getReturnValues(this, variableName, handlerRegistry)
 
-    override fun getReturnValue(variableName: VariableName, handlerName: String): PGobject? =
-        scopeCapabilities.getReturnValue(this, variableName, handlerName)
+    override fun getReturnValue(variableName: VariableName, handler: Handler<*>): PGobject? =
+        scopeCapabilities.getReturnValue(this, variableName, handler)
 
     /**
      * Resumes execution of this continuation from its suspension point.
