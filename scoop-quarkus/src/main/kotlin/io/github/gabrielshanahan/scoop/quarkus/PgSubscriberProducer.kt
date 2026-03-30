@@ -146,9 +146,9 @@ class PgSubscriberProducer(
         dataSourceReactiveRuntimeConfig: DataSourceReactiveRuntimeConfig,
         dataSourceReactivePostgreSQLConfig: DataSourceReactivePostgreSQLConfig,
     ) {
-        pgConnectOptions.setCachePreparedStatements(
-            dataSourceReactiveRuntimeConfig.cachePreparedStatements()
-        )
+        dataSourceReactiveRuntimeConfig.cachePreparedStatements().ifPresent {
+            pgConnectOptions.setCachePreparedStatements(it)
+        }
 
         if (dataSourceReactivePostgreSQLConfig.pipeliningLimit().isPresent) {
             pgConnectOptions.setPipeliningLimit(
