@@ -204,7 +204,6 @@ class CooperationContextModule(private val objectMapper: ObjectMapper) :
                         parser.nextToken()
                         readAsString(parser, sb)
                     }
-                    sb.dropLast(1) // drop trailing comma
                     sb.append('}')
                 }
                 JsonToken.START_ARRAY -> {
@@ -224,7 +223,7 @@ class CooperationContextModule(private val objectMapper: ObjectMapper) :
                 JsonToken.VALUE_NUMBER_FLOAT -> sb.append(parser.numberValue.toString())
                 JsonToken.VALUE_TRUE,
                 JsonToken.VALUE_FALSE -> sb.append(parser.booleanValue.toString())
-                JsonToken.VALUE_NULL -> {}
+                JsonToken.VALUE_NULL -> sb.append("null")
                 JsonToken.FIELD_NAME -> sb.append("\"${parser.text}\":")
                 else -> error("Unsupported token: ${parser.currentToken()}")
             }
