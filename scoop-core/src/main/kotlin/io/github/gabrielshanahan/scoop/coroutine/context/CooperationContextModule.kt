@@ -3,6 +3,7 @@ package io.github.gabrielshanahan.scoop.coroutine.context
 import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.core.JsonToken
+import com.fasterxml.jackson.core.io.JsonStringEncoder
 import com.fasterxml.jackson.databind.BeanDescription
 import com.fasterxml.jackson.databind.DeserializationContext
 import com.fasterxml.jackson.databind.JsonSerializer
@@ -218,13 +219,21 @@ class CooperationContextModule(private val objectMapper: ObjectMapper) :
                     }
                     sb.append(']')
                 }
-                JsonToken.VALUE_STRING -> sb.append("\"${parser.text}\"")
+                JsonToken.VALUE_STRING -> {
+                    sb.append('"')
+                    JsonStringEncoder.getInstance().quoteAsString(parser.text, sb)
+                    sb.append('"')
+                }
                 JsonToken.VALUE_NUMBER_INT,
                 JsonToken.VALUE_NUMBER_FLOAT -> sb.append(parser.numberValue.toString())
                 JsonToken.VALUE_TRUE,
                 JsonToken.VALUE_FALSE -> sb.append(parser.booleanValue.toString())
                 JsonToken.VALUE_NULL -> sb.append("null")
-                JsonToken.FIELD_NAME -> sb.append("\"${parser.text}\":")
+                JsonToken.FIELD_NAME -> {
+                    sb.append('"')
+                    JsonStringEncoder.getInstance().quoteAsString(parser.text, sb)
+                    sb.append("\":")
+                }
                 else -> error("Unsupported token: ${parser.currentToken()}")
             }
             return sb
