@@ -28,6 +28,34 @@ class CooperationContextTest {
     }
 
     @Test
+    fun `test null values are preserved in round-trip`() {
+        val jsonString = """{"key-with-null":null}"""
+        val context = JsonObject(jsonString).mapTo(CooperationContext::class.java)
+        assertEquals(jsonString, objectMapper.writeValueAsString(context))
+    }
+
+    @Test
+    fun `test null values mixed with other values are preserved in round-trip`() {
+        val jsonString = """{"a-before":"a","b-nullable":null,"c-after":"b"}"""
+        val context = JsonObject(jsonString).mapTo(CooperationContext::class.java)
+        assertEquals(jsonString, objectMapper.writeValueAsString(context))
+    }
+
+    @Test
+    fun `test nested null values are preserved in round-trip`() {
+        val jsonString = """{"outer":{"inner":null,"range":null}}"""
+        val context = JsonObject(jsonString).mapTo(CooperationContext::class.java)
+        assertEquals(jsonString, objectMapper.writeValueAsString(context))
+    }
+
+    @Test
+    fun `test null values in arrays are preserved in round-trip`() {
+        val jsonString = """{"items":[1,null,3]}"""
+        val context = JsonObject(jsonString).mapTo(CooperationContext::class.java)
+        assertEquals(jsonString, objectMapper.writeValueAsString(context))
+    }
+
+    @Test
     fun `test everything works as expected`() {
         val jsonString = """{"TestKey":{"value":"test-value"},"unknown-key":"test-value"}"""
         val context = JsonObject(jsonString).mapTo(CooperationContext::class.java)
