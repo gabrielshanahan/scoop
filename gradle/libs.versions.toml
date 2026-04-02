@@ -9,6 +9,7 @@ maven-publish = "0.32.0"        # checked: 2026-03-10 (0.33+ requires Kotlin 2.2
 slf4j = "2.0.17"               # checked: 2026-03-10
 jackson = "2.18.3"             # checked: 2026-03-10
 postgresql = "42.7.10"          # checked: 2026-03-10
+junit = "5.11.4"                # checked: 2026-04-02
 
 [libraries]
 # Core (framework-agnostic) dependencies
@@ -17,6 +18,7 @@ fluentjdbc = { module = "org.codejargon:fluentjdbc", version.ref = "fluentjdbc" 
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 
 # Quarkus dependencies
 quarkus-bom = { module = "io.quarkus.platform:quarkus-bom", version.ref = "quarkus" }
