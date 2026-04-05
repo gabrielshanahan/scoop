@@ -8,13 +8,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## v0.2.6 — 2026-04-05
 
+### Added
+
+- Configurable event loop tick interval — `tickInterval` parameter on `PostgresMessageQueue` and `Scoop.create()`, with `scoop.tick-interval-ms` application property for Quarkus (default: 50ms)
+
 ## v0.2.5 — 2026-04-03
+
+### Fixed
+
+- `PgSubscriberTopicNotifier` callbacks now dispatch on virtual threads instead of the Vert.x event loop, preventing blocking when tick processing takes longer than expected
 
 ## v0.2.4 — 2026-04-02
 
+### Fixed
+
+- `CooperationContext.readAsString()` now correctly re-escapes decoded JSON strings during round-trip serialization
+
 ## v0.2.3 — 2026-04-02
 
+### Fixed
+
+- `CooperationContext.readAsString()` no longer silently drops `null` values during round-trip serialization
+
 ## v0.2.2 — 2026-03-30
+
+### Changed
+
+- Bump Quarkus 3.24.5 → 3.32.3 (with `cachePreparedStatements` API compatibility fix)
+- Bump PostgreSQL driver 42.7.5 → 42.7.10
+- Bump SLF4J 2.0.16 → 2.0.17
 
 ## v0.2.1 — 2026-03-20
 
