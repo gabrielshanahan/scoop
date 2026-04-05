@@ -14,7 +14,9 @@ import io.github.gabrielshanahan.scoop.messaging.TopicNotifier
 import io.vertx.pgclient.pubsub.PgSubscriber
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
+import java.time.Duration
 import org.codejargon.fluentjdbc.api.FluentJdbc
+import org.eclipse.microprofile.config.inject.ConfigProperty
 
 /**
  * CDI producer that creates scoop-core components using Quarkus-managed beans.
@@ -27,6 +29,8 @@ class ScoopProducer(
     private val fluentJdbc: FluentJdbc,
     private val objectMapper: ObjectMapper,
     private val pgSubscriber: PgSubscriber,
+    @ConfigProperty(name = "scoop.tick-interval-ms", defaultValue = "50")
+    private val tickIntervalMs: Long,
 ) {
 
     @Produces @ApplicationScoped fun jsonbHelper(): JsonbHelper = JsonbHelper(objectMapper)
@@ -87,5 +91,6 @@ class ScoopProducer(
             structuredCooperationCapabilities,
             messageRepository,
             eventLoop,
+            Duration.ofMillis(tickIntervalMs),
         )
 }
