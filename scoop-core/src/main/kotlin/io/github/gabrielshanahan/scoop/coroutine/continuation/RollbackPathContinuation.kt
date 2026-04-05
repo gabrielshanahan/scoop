@@ -100,8 +100,6 @@ import java.time.Instant
  * @see BaseCooperationContinuation for shared continuation logic
  * @see buildRollbackSteps for the sub-step generation logic
  */
-
-// TODO: Config
 const val ROLLING_BACK_PREFIX = "Rollback of "
 const val ROLLING_BACK_CHILD_SCOPES_STEP_SUFFIX = " (rolling back child scopes)"
 
