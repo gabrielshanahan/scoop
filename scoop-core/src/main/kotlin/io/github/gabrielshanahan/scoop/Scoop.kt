@@ -7,10 +7,12 @@ import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContextModul
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.Capabilities
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.MessageEventRepository
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ReturnValueRepository
+import io.github.gabrielshanahan.scoop.messaging.DEFAULT_TICK_INTERVAL
 import io.github.gabrielshanahan.scoop.messaging.MessageRepository
 import io.github.gabrielshanahan.scoop.messaging.NoOpTopicNotifier
 import io.github.gabrielshanahan.scoop.messaging.PostgresMessageQueue
 import io.github.gabrielshanahan.scoop.messaging.TopicNotifier
+import java.time.Duration
 import javax.sql.DataSource
 import org.codejargon.fluentjdbc.api.FluentJdbcBuilder
 
@@ -43,11 +45,13 @@ private constructor(
          * @param objectMapper Jackson ObjectMapper (default includes Kotlin and
          *   CooperationContextModule)
          * @param topicNotifier Notification mechanism for topic messages (default: polling only)
+         * @param tickInterval How often the event loop polls for ready sagas (default: 50ms)
          */
         fun create(
             dataSource: DataSource,
             objectMapper: ObjectMapper = defaultObjectMapper(),
             topicNotifier: TopicNotifier = NoOpTopicNotifier,
+            tickInterval: Duration = DEFAULT_TICK_INTERVAL,
         ): Scoop {
             val fluentJdbc = FluentJdbcBuilder().connectionProvider(dataSource).build()
             val jsonbHelper = JsonbHelper(objectMapper)
@@ -58,7 +62,13 @@ private constructor(
                 Capabilities(messageRepository, messageEventRepository, returnValueRepository)
             val eventLoop = EventLoop(fluentJdbc, messageEventRepository, capabilities, jsonbHelper)
             val messageQueue =
-                PostgresMessageQueue(topicNotifier, capabilities, messageRepository, eventLoop)
+                PostgresMessageQueue(
+                    topicNotifier,
+                    capabilities,
+                    messageRepository,
+                    eventLoop,
+                    tickInterval,
+                )
 
             return Scoop(messageQueue, capabilities)
         }

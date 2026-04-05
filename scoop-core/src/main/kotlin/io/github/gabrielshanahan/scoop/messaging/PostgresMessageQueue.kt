@@ -18,6 +18,11 @@ import java.util.concurrent.ConcurrentHashMap
 import org.postgresql.util.PGobject
 import org.slf4j.LoggerFactory
 
+private const val DEFAULT_TICK_INTERVAL_MS = 50L
+
+/** Default interval between event loop polling ticks (50 milliseconds). */
+val DEFAULT_TICK_INTERVAL: Duration = Duration.ofMillis(DEFAULT_TICK_INTERVAL_MS)
+
 /**
  * Interactions with the message queue implementation. Supports [launching messages][launch],
  * [fetching messages][fetch] and [subscribing handlers (sagas) to a topic][subscribe]. Callers are
@@ -35,6 +40,7 @@ class PostgresMessageQueue(
     private val structuredCooperationCapabilities: StructuredCooperationCapabilities,
     private val messageRepository: MessageRepository,
     private val eventLoop: EventLoop,
+    private val tickInterval: Duration = DEFAULT_TICK_INTERVAL,
 ) : HandlerRegistry {
 
     private val topicsToCoroutines =
@@ -87,13 +93,7 @@ class PostgresMessageQueue(
         val notifierHandle = topicNotifier.onMessage(topic) { eventLoop.tick(topic, saga) }
         topicsToCoroutines.add(topic to saga.identifier)
 
-        val subscription =
-            eventLoop.tickPeriodically(
-                topic,
-                saga,
-                // TODO: config
-                Duration.ofMillis(50),
-            )
+        val subscription = eventLoop.tickPeriodically(topic, saga, tickInterval)
 
         return Subscription {
             topicsToCoroutines.remove(topic to saga.identifier)
