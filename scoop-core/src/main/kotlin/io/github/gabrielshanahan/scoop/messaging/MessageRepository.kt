@@ -5,6 +5,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 import org.codejargon.fluentjdbc.api.FluentJdbc
 import org.postgresql.util.PGobject
+import org.slf4j.LoggerFactory
 
 /**
  * MessageRepository - Message persistence and retrieval operations
@@ -58,6 +59,10 @@ import org.postgresql.util.PGobject
  */
 class MessageRepository(private val fluentJdbc: FluentJdbc) {
 
+    companion object {
+        private val logger = LoggerFactory.getLogger(MessageRepository::class.java)
+    }
+
     /**
      * Retrieves a message by its unique identifier from the message table.
      *
@@ -93,6 +98,7 @@ class MessageRepository(private val fluentJdbc: FluentJdbc) {
                 )
             }
             .orElse(null)
+            .also { if (it == null) logger.debug("Message not found: id={}", messageId) }
 
     /**
      * Persists a new message to the message table and returns the complete message with generated
@@ -144,4 +150,5 @@ class MessageRepository(private val fluentJdbc: FluentJdbc) {
                             .atOffset(ZoneOffset.UTC),
                 )
             }
+            .also { logger.debug("Inserted message: id={}, topic='{}'", it.id, topic) }
 }

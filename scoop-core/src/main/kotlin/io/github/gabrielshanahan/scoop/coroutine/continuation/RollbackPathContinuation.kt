@@ -14,6 +14,7 @@ import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ScopeCapa
 import io.github.gabrielshanahan.scoop.messaging.Message
 import java.sql.Connection
 import java.time.Instant
+import org.slf4j.LoggerFactory
 
 /**
  * A continuation for rollback (compensating) execution of saga steps.
@@ -102,6 +103,11 @@ import java.time.Instant
  */
 const val ROLLING_BACK_PREFIX = "Rollback of "
 const val ROLLING_BACK_CHILD_SCOPES_STEP_SUFFIX = " (rolling back child scopes)"
+
+private val rollbackLogger =
+    LoggerFactory.getLogger(
+        "io.github.gabrielshanahan.scoop.coroutine.continuation.RollbackPathContinuation"
+    )
 
 @Suppress("LongParameterList")
 internal class RollbackPathContinuation(
@@ -236,6 +242,12 @@ internal fun DistributedCoroutine.buildRollbackPathContinuation(
             scopeCapabilities,
             originalInstances,
         )
+
+    rollbackLogger.debug(
+        "Built rollback plan: coroutine='{}', rollbackSteps={}",
+        identifier,
+        rollbackSteps.size,
+    )
 
     // Helper: creates a sentinel rollback step for edge cases where we need a valid step reference
     // but have nothing to actually roll back. Builds rollback steps for a single synthetic instance

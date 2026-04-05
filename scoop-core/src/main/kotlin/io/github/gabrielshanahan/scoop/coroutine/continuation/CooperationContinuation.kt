@@ -14,6 +14,7 @@ import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ScopeCapa
 import io.github.gabrielshanahan.scoop.messaging.Message
 import java.sql.Connection
 import org.postgresql.util.PGobject
+import org.slf4j.LoggerFactory
 
 /**
  * Since the lifetime of a [CooperationScope] is exactly the same as the lifetime of the (delimited)
@@ -107,6 +108,10 @@ internal abstract class BaseCooperationContinuation(
     private var stepIteration: Int,
     private var childFailureHandlerIteration: ChildFailureHandlerIteration,
 ) : CooperationContinuation {
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(BaseCooperationContinuation::class.java)
+    }
 
     /**
      * Tracks the current step being executed within this continuation. Since suspension points
@@ -276,8 +281,13 @@ internal abstract class BaseCooperationContinuation(
      */
     override fun resumeWith(
         lastStepResult: Continuation.LastStepResult
-    ): Continuation.ContinuationResult =
-        when (suspensionPoint) {
+    ): Continuation.ContinuationResult {
+        logger.debug(
+            "Resuming continuation from {}: coroutine='{}'",
+            suspensionPoint::class.simpleName,
+            distributedCoroutine.identifier,
+        )
+        return when (suspensionPoint) {
             is SuspensionPoint.BeforeFirstStep -> {
                 // Starting fresh - execute the first step in the saga
                 currentStep = suspensionPoint.firstStep
@@ -306,6 +316,7 @@ internal abstract class BaseCooperationContinuation(
                 resumeCoroutine(lastStepResult)
             }
         }
+    }
 
     /**
      * Executes the actual continuation logic with proper exception handling and give-up checking.
@@ -326,6 +337,12 @@ internal abstract class BaseCooperationContinuation(
         return try {
             // Check if we should abandon execution before doing any work
             giveUpIfNecessary()
+
+            logger.debug(
+                "Executing step: coroutine='{}', step='{}'",
+                distributedCoroutine.identifier,
+                currentStep.name,
+            )
 
             // Execute the step logic and check for give-up conditions that arose during execution
             handleFailuresOrResume(lastStepResult).also { giveUpIfNecessary() }
@@ -391,6 +408,11 @@ internal abstract class BaseCooperationContinuation(
     ): Continuation.ContinuationResult =
         when (lastStepResult) {
             is Continuation.LastStepResult.ChildFailed -> {
+                logger.debug(
+                    "Handling child failures: step='{}', iteration={}",
+                    currentStep.name,
+                    childFailureHandlerIteration,
+                )
                 // Increment child failure handler iteration for each failure handling invocation
                 val incrementedIteration = childFailureHandlerIteration.incremented()
                 childFailureHandlerIteration = incrementedIteration
@@ -445,6 +467,10 @@ internal abstract class BaseCooperationContinuation(
     private fun resume(resumeStep: () -> NextStep): Continuation.ContinuationResult =
         if (suspensionPoint is SuspensionPoint.AfterLastStep) {
             // All steps completed - saga is done, don't execute the step
+            logger.debug(
+                "Saga completed all steps: coroutine='{}'",
+                distributedCoroutine.identifier,
+            )
             Continuation.ContinuationResult.Success
         } else {
             // More steps remain - execute this step and suspend to wait for children
