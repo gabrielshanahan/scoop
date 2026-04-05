@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## v0.2.7 — 2026-04-05
 
+### Changed
+
+- Overhaul logging: most INFO-level logs downgraded to DEBUG, keeping INFO for lifecycle events only
+- Add strategic DEBUG logging across EventLoop, Capabilities, continuations, and repositories for execution tracing
+- Fix pre-existing detekt LongMethod violations in StubHandlerBlockingTest
+
 ## v0.2.6 — 2026-04-05
 
 ### Added
