@@ -12,12 +12,17 @@ import java.util.UUID
 import org.codejargon.fluentjdbc.api.FluentJdbc
 import org.intellij.lang.annotations.Language
 import org.postgresql.util.PGobject
+import org.slf4j.LoggerFactory
 
 @Suppress("TooManyFunctions")
 class MessageEventRepository(
     private val jsonbHelper: JsonbHelper,
     private val fluentJdbc: FluentJdbc,
 ) {
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(MessageEventRepository::class.java)
+    }
 
     /**
      * Records that a message was emitted on the global scope (breaking cooperation lineage).
@@ -36,6 +41,7 @@ class MessageEventRepository(
         cooperationLineage: List<UUID>,
         context: CooperationContext?,
     ) {
+        logger.debug("Inserting global EMITTED event: messageId={}", messageId)
         fluentJdbc
             .queryOn(connection)
             .update(
@@ -79,6 +85,12 @@ class MessageEventRepository(
         cooperationLineage: List<UUID>,
         context: CooperationContext?,
     ) {
+        logger.debug(
+            "Inserting scoped EMITTED event: messageId={}, coroutine='{}', step='{}'",
+            messageId,
+            coroutineName,
+            stepName,
+        )
         fluentJdbc
             .queryOn(connection)
             .update(
@@ -137,6 +149,7 @@ class MessageEventRepository(
         cooperationLineage: List<UUID>,
         exception: CooperationFailure,
     ) {
+        logger.debug("Inserting ROLLBACK_EMITTED event for lineage")
         val lineageArray = connection.createArrayOf("uuid", cooperationLineage.toTypedArray())
 
         fluentJdbc
@@ -233,6 +246,7 @@ class MessageEventRepository(
         cooperationLineage: List<UUID>,
         exception: CooperationFailure,
     ) {
+        logger.debug("Inserting CANCELLATION_REQUESTED event")
         val lineageArray = connection.createArrayOf("uuid", cooperationLineage.toTypedArray())
 
         fluentJdbc
@@ -491,6 +505,7 @@ class MessageEventRepository(
         topic: String,
         eventLoopStrategy: EventLoopStrategy,
     ) {
+        logger.debug("Starting continuations: coroutine='{}', topic='{}'", coroutineName, topic)
         @Language("PostgreSQL")
         val sql =
             """

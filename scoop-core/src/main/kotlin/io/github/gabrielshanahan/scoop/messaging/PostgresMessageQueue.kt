@@ -53,7 +53,7 @@ class PostgresMessageQueue(
     /** Fetches a message, given its [messageId]. */
     fun fetch(connection: Connection, messageId: UUID): Message? =
         messageRepository.fetchMessage(connection, messageId)?.also {
-            logger.info("Fetched message: id=${it.id}, topic=${it.topic}")
+            logger.debug("Fetched message: id=${it.id}, topic=${it.topic}")
         }
 
     /** Launches a message on the global scope, i.e., a top-level message. */
@@ -84,6 +84,7 @@ class PostgresMessageQueue(
      * from notifications.
      */
     fun subscribe(topic: String, saga: DistributedCoroutine): Subscription {
+        logger.debug("Subscribing saga '{}' to topic '{}'", saga.identifier, topic)
         val notifierHandle = topicNotifier.onMessage(topic) { eventLoop.tick(topic, saga) }
         topicsToCoroutines.add(topic to saga.identifier)
 

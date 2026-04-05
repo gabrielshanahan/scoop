@@ -13,6 +13,7 @@ import io.github.gabrielshanahan.scoop.util.uuidV7
 import java.sql.Connection
 import java.time.Instant
 import org.postgresql.util.PGobject
+import org.slf4j.LoggerFactory
 
 /**
  * Represents the root of an independent cooperation hierarchy.
@@ -262,12 +263,18 @@ class Capabilities(
     private val messageEventRepository: MessageEventRepository,
     private val returnValueRepository: ReturnValueRepository,
 ) : ScopeCapabilities, StructuredCooperationCapabilities {
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(Capabilities::class.java)
+    }
+
     override fun launchOnGlobalScope(
         connection: Connection,
         topic: String,
         payload: PGobject,
         context: CooperationContext?,
     ): CooperationRoot {
+        logger.debug("Launching message on global scope: topic='{}'", topic)
         val message = messageRepository.insertMessage(connection, topic, payload)
         val cooperationId = uuidV7()
         val cooperationLineage = listOf(cooperationId)
@@ -294,6 +301,13 @@ class Capabilities(
         payload: PGobject,
         additionalContext: CooperationContext?,
     ): Message {
+        logger.debug(
+            "Launching scoped message: topic='{}', coroutine='{}', step='{}'",
+            topic,
+            scope.continuation.continuationIdentifier.distributedCoroutineIdentifier
+                .renderAsString(),
+            scope.continuation.continuationIdentifier.stepName,
+        )
         val message = messageRepository.insertMessage(scope.connection, topic, payload)
 
         messageEventRepository.insertScopedEmittedEvent(
@@ -317,6 +331,7 @@ class Capabilities(
         source: String,
         reason: String,
     ) {
+        logger.debug("Requesting cancellation: source='{}', reason='{}'", source, reason)
         val exception = CancellationRequestedException(reason)
         val cooperationFailure = CooperationFailure.fromThrowable(exception, source)
 
@@ -333,6 +348,7 @@ class Capabilities(
         source: String,
         reason: String,
     ) {
+        logger.debug("Requesting rollback: source='{}', reason='{}'", source, reason)
         val exception = RollbackRequestedException(reason)
         val cooperationFailure = CooperationFailure.fromThrowable(exception, source)
 
@@ -348,6 +364,12 @@ class Capabilities(
         suspendedAt: Instant,
         throwable: Throwable,
     ) {
+        logger.debug(
+            "Emitting rollbacks for child emissions: coroutine='{}', step='{}'",
+            scope.continuation.continuationIdentifier.distributedCoroutineIdentifier
+                .renderAsString(),
+            scope.continuation.continuationIdentifier.stepName,
+        )
         val cooperationFailure =
             CooperationFailure.fromThrowable(
                 ParentSaidSoException(throwable),
@@ -379,6 +401,12 @@ class Capabilities(
             )
 
         if (exceptions.any()) {
+            logger.warn(
+                "Saga giving up due to {} exception(s): coroutine='{}'",
+                exceptions.size,
+                scope.continuation.continuationIdentifier.distributedCoroutineIdentifier
+                    .renderAsString(),
+            )
             throw GaveUpException(exceptions)
         }
     }
@@ -388,6 +416,7 @@ class Capabilities(
         variableName: VariableName,
         value: PGobject,
     ) {
+        logger.debug("Storing return value: variableName='{}'", variableName)
         val handlerName =
             scope.continuation.continuationIdentifier.distributedCoroutineIdentifier.name
 
@@ -404,13 +433,15 @@ class Capabilities(
         scope: CooperationScope,
         variableName: VariableName,
         handlerRegistry: (String) -> Handler<*>,
-    ): Map<Handler<*>, PGobject> =
-        returnValueRepository.getReturnValues(
+    ): Map<Handler<*>, PGobject> {
+        logger.debug("Retrieving return values: variableName='{}'", variableName)
+        return returnValueRepository.getReturnValues(
             scope.connection,
             scope.scopeIdentifier.cooperationLineage,
             variableName,
             handlerRegistry,
         )
+    }
 
     override fun getReturnValue(
         scope: CooperationScope,

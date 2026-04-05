@@ -13,6 +13,7 @@ import io.github.gabrielshanahan.scoop.messaging.PostgresMessageQueue
 import io.github.gabrielshanahan.scoop.messaging.TopicNotifier
 import javax.sql.DataSource
 import org.codejargon.fluentjdbc.api.FluentJdbcBuilder
+import org.slf4j.LoggerFactory
 
 /**
  * Main entry point for creating and using Scoop — the Structured Cooperation library.
@@ -36,6 +37,8 @@ private constructor(
 ) : AutoCloseable {
 
     companion object {
+        private val logger = LoggerFactory.getLogger(Scoop::class.java)
+
         /**
          * Creates a fully-wired Scoop instance from a [DataSource].
          *
@@ -60,6 +63,7 @@ private constructor(
             val messageQueue =
                 PostgresMessageQueue(topicNotifier, capabilities, messageRepository, eventLoop)
 
+            logger.info("Scoop framework initialized")
             return Scoop(messageQueue, capabilities)
         }
 

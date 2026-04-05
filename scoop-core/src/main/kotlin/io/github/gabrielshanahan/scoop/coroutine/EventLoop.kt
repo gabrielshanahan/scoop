@@ -129,7 +129,7 @@ class EventLoop(
             whileISaySo { repeatCount, saySo ->
                 fluentJdbc.transactional { connection ->
                     try {
-                        logger.info(
+                        logger.debug(
                             "Run number $repeatCount for topic $topic and coroutine ${distributedCoroutine.identifier}"
                         )
                         val coroutineState =
@@ -186,7 +186,7 @@ class EventLoop(
         executor.scheduleWithFixedDelay(
             {
                 try {
-                    logger.info(
+                    logger.debug(
                         "Starting tick for topic $topic and coroutine ${distributedCoroutine.identifier}"
                     )
                     tick(topic, distributedCoroutine)
@@ -266,13 +266,13 @@ class EventLoop(
             )
 
         if (result == null) {
-            logger.info(
+            logger.debug(
                 "[${connection.backendPID()}] " +
                     "No messages for coroutine ${distributedCoroutine.identifier}"
             )
             return null
         } else {
-            logger.info(
+            logger.debug(
                 "[${connection.backendPID()}] " +
                     "Processing message for coroutine " +
                     "${distributedCoroutine.identifier}: " +
@@ -645,7 +645,7 @@ class EventLoop(
                 )
         }
 
-        logger.info(
+        logger.debug(
             "[${connection.backendPID()}] " +
                 "Finished processing message for continuation " +
                 "${cooperativeContinuation.continuationIdentifier}: " +
