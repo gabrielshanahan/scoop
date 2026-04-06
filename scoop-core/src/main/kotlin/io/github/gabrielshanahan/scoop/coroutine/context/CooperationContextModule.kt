@@ -12,8 +12,8 @@ import com.fasterxml.jackson.databind.SerializationConfig
 import com.fasterxml.jackson.databind.SerializerProvider
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer
 import com.fasterxml.jackson.databind.module.SimpleModule
-import com.fasterxml.jackson.databind.ser.BeanSerializerFactory
 import com.fasterxml.jackson.databind.ser.BeanSerializerModifier
+import com.fasterxml.jackson.databind.ser.ResolvableSerializer
 import com.fasterxml.jackson.databind.ser.std.StdSerializer
 
 /**
@@ -140,14 +140,23 @@ class CooperationContextModule(private val objectMapper: ObjectMapper) :
 
                 is CooperationContext.Element -> {
                     gen.writeFieldName(value.key.serializedValue)
+                    // Ensure the original serializer for this type has been captured by our
+                    // BeanSerializerModifier side effect. findValueSerializer triggers the full
+                    // resolution chain (including modifySerializer), populating oldSerializers.
+                    if (value::class.java !in oldSerializers) {
+                        provider.findValueSerializer(value.javaClass)
+                    }
                     @Suppress("UNCHECKED_CAST")
                     val oldSerializer =
-                        (oldSerializers[value::class.java]
-                            ?: BeanSerializerFactory.instance.createSerializer(
-                                provider,
-                                provider.config.constructType(value.javaClass),
-                            ))
+                        oldSerializers.getValue(value::class.java)
                             as JsonSerializer<CooperationContext.Element>
+                    // The captured serializer was intercepted in modifySerializer *before* its
+                    // own resolve() pass ran. Without resolving, nested polymorphic collection
+                    // serializers are not wired with their AsPropertyTypeSerializer wrappers,
+                    // so @JsonTypeInfo discriminators get dropped for collection elements.
+                    if (oldSerializer is ResolvableSerializer) {
+                        oldSerializer.resolve(provider)
+                    }
                     oldSerializer.serialize(value, gen, provider)
                 }
 
