@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+## v0.2.8 — 2026-04-06
+
 ### Fixed
 
 - `CooperationContext` serialization now preserves `@JsonTypeInfo` discriminators for collection elements inside `MappedElement`s, fixing `InvalidTypeIdException` on round-trip of polymorphic collections
