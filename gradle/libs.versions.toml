@@ -7,7 +7,7 @@ fluentjdbc = "1.8.6"           # checked: 2026-03-10
 quarkus-fluentjdbc = "1.0.0"   # checked: 2026-03-10
 maven-publish = "0.32.0"        # checked: 2026-03-10 (0.33+ requires Kotlin 2.2+)
 slf4j = "2.0.17"               # checked: 2026-03-10
-jackson = "2.18.3"             # checked: 2026-03-10
+jackson = "2.21.2"             # checked: 2026-03-10
 postgresql = "42.7.10"          # checked: 2026-03-10
 junit = "5.11.4"                # checked: 2026-04-02
 
