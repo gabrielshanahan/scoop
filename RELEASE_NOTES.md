@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+## v0.2.9 — 2026-04-23
+
 ### Added
 
 - `instances` parameter on `PostgresMessageQueue.subscribe(...)` — spins up N independent workers for a saga within a single JVM, each with its own serialised tick loop and `DistributedCoroutineIdentifier` instance UUID. Workers compete via Postgres `FOR UPDATE SKIP LOCKED`, the same mechanism used for multi-service horizontal scaling. Defaults to 1 (unchanged behaviour).
