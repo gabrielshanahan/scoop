@@ -6,11 +6,13 @@ import io.github.gabrielshanahan.scoop.coroutine.builder.saga
 import io.github.gabrielshanahan.scoop.coroutine.ciSleep
 import io.github.gabrielshanahan.scoop.transactional
 import io.quarkus.test.junit.QuarkusTest
+import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -148,5 +150,99 @@ class PostgresMessageQueueTest : StructuredCooperationTest() {
                 )
             }
         ciSleep(200)
+    }
+
+    @Test
+    fun `subscribe with multiple instances fans work out across distinct instance UUIDs`() {
+        val instanceCount = 3
+        // One message per worker. Each worker is single-threaded (scheduled and NOTIFY ticks are
+        // funneled through the same executor) and blocks in `await` inside its step, holding the
+        // row lock via SKIP LOCKED. That forces every message to be picked up by a *different*
+        // worker, so exactly `instanceCount` distinct instance UUIDs must participate.
+        val latch = CountDownLatch(instanceCount)
+        val seenInstances = Collections.synchronizedSet(mutableSetOf<String>())
+        val seenNames = Collections.synchronizedSet(mutableSetOf<String>())
+
+        messageQueue
+            .subscribe(
+                testTopic,
+                saga(testHandler, handlerRegistry.eventLoopStrategy()) {
+                    step { scope, _ ->
+                        val identifier =
+                            scope.continuation.continuationIdentifier.distributedCoroutineIdentifier
+                        seenInstances.add(identifier.instance)
+                        seenNames.add(identifier.name)
+                        latch.countDown()
+                        check(latch.await(10, TimeUnit.SECONDS)) {
+                            "Timed out waiting for all $instanceCount workers to enter the step"
+                        }
+                    }
+                },
+                instances = instanceCount,
+            )
+            .use {
+                for (i in 1..instanceCount) {
+                    val payload = jsonbHelper.toPGobject(mapOf("text" to "Message $i"))
+                    fluentJdbc.transactional { connection ->
+                        messageQueue.launch(connection, testTopic, payload)
+                    }
+                }
+
+                assertTrue(
+                    latch.await(10, TimeUnit.SECONDS),
+                    "All $instanceCount messages should be processed concurrently",
+                )
+
+                assertEquals(
+                    instanceCount,
+                    seenInstances.size,
+                    "Expected exactly $instanceCount distinct instance UUIDs, saw: $seenInstances",
+                )
+                assertEquals(
+                    setOf(testHandler),
+                    seenNames,
+                    "All instances should share the saga name",
+                )
+            }
+        ciSleep(200)
+    }
+
+    @Test
+    fun `subscribe rejects instances less than one`() {
+        val saga = saga(testHandler, handlerRegistry.eventLoopStrategy()) { step { _, _ -> } }
+
+        val ex =
+            assertThrows(IllegalArgumentException::class.java) {
+                messageQueue.subscribe(testTopic, saga, instances = 0)
+            }
+        assertTrue(
+            ex.message!!.contains("instances must be >= 1"),
+            "Unexpected message: ${ex.message}",
+        )
+    }
+
+    @Test
+    fun `requiredConnectionCount reflects registered worker instances`() {
+        val baseline = messageQueue.requiredConnectionCount
+
+        val subscription =
+            messageQueue.subscribe(
+                testTopic,
+                saga(testHandler, handlerRegistry.eventLoopStrategy()) { step { _, _ -> } },
+                instances = 3,
+            )
+        subscription.use {
+            assertEquals(
+                baseline + 3,
+                messageQueue.requiredConnectionCount,
+                "Subscribing with instances = 3 should add 3 workers to the connection budget",
+            )
+        }
+
+        assertEquals(
+            baseline,
+            messageQueue.requiredConnectionCount,
+            "Closing the subscription should release all three workers from the connection budget",
+        )
     }
 }

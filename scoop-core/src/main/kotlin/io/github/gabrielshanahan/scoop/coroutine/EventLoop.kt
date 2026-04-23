@@ -21,6 +21,8 @@ import java.time.Duration
 import java.time.Instant
 import java.util.*
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import org.codejargon.fluentjdbc.api.FluentJdbc
@@ -166,16 +168,23 @@ class EventLoop(
      * [thundering herd problems](https://en.wikipedia.org/wiki/Thundering_herd_problem) when
      * multiple instances are running.
      *
+     * The returned [PeriodicTick] also exposes [trigger][PeriodicTick.trigger], which submits an
+     * ad-hoc tick onto the same single-thread executor. This is how push-based notifications (e.g.
+     * Postgres LISTEN/NOTIFY callbacks) wake the loop up without running concurrently with a
+     * scheduled tick — all ticks for a given [distributedCoroutine] are serialised through the
+     * executor, so a single saga identifier never runs overlapping continuations.
+     *
      * @param topic The message topic this saga handles
      * @param distributedCoroutine The saga definition to execute
      * @param runApproximatelyEvery How often to tick (with jitter applied)
-     * @return An [AutoCloseable] that can be used to stop the periodic ticking
+     * @return A [PeriodicTick] handle: [close][PeriodicTick.close] stops the ticker;
+     *   [trigger][PeriodicTick.trigger] queues an immediate tick on the same executor.
      */
     fun tickPeriodically(
         topic: String,
         distributedCoroutine: DistributedCoroutine,
         runApproximatelyEvery: Duration,
-    ): AutoCloseable {
+    ): PeriodicTick {
         val executor =
             Executors.newSingleThreadScheduledExecutor { r ->
                 Thread(r, "scoop-tick-${distributedCoroutine.identifier}").apply { isDaemon = true }
@@ -183,23 +192,63 @@ class EventLoop(
         val intervalMs = runApproximatelyEvery.toMillis()
         val jitterMs = (intervalMs * 0.02).toLong()
 
+        // One permit represents "there is at most one tick accounted for — running or queued."
+        // Both the scheduled path and [trigger] try-acquire *before* enqueuing and release once the
+        // tick finishes, so only one tick is ever pending on the executor at a time. Missed
+        // wake-ups are picked up by the next scheduled tick within `runApproximatelyEvery`, and the
+        // tick's inner `whileISaySo` loop opens a fresh transaction per iteration so it still sees
+        // messages committed while it was running.
+        val gate = Semaphore(1)
+
+        val runTick = Runnable {
+            try {
+                logger.debug(
+                    "Starting tick for topic $topic and coroutine ${distributedCoroutine.identifier}"
+                )
+                tick(topic, distributedCoroutine)
+            } catch (e: Exception) {
+                logger.error("Event loop for ${distributedCoroutine.identifier} failed", e)
+            } finally {
+                gate.release()
+            }
+        }
+
+        val scheduledTick = Runnable {
+            // Scheduled fires on a fixed cadence, but if a triggered tick is already pending or
+            // running this tick collapses to a no-op — the in-flight one will do the work.
+            if (!gate.tryAcquire()) return@Runnable
+            runTick.run()
+        }
+
         executor.scheduleWithFixedDelay(
-            {
-                try {
-                    logger.debug(
-                        "Starting tick for topic $topic and coroutine ${distributedCoroutine.identifier}"
-                    )
-                    tick(topic, distributedCoroutine)
-                } catch (e: Exception) {
-                    logger.error("Event loop for ${distributedCoroutine.identifier} failed", e)
-                }
-            },
+            scheduledTick,
             0,
             intervalMs + jitterMs,
             TimeUnit.MILLISECONDS,
         )
 
-        return AutoCloseable { executor.shutdown() }
+        return object : PeriodicTick {
+            override fun trigger() {
+                // Acquire first, enqueue second: if another tick is already pending or running,
+                // we drop this trigger entirely rather than piling up no-op runnables on the
+                // executor's queue. The permit is released by `runTick` or the catch branch below.
+                if (!gate.tryAcquire()) return
+                try {
+                    executor.execute(runTick)
+                } catch (e: RejectedExecutionException) {
+                    // The executor has been closed between acquire and enqueue; release and log.
+                    gate.release()
+                    logger.debug(
+                        "Ignoring trigger for already-closed tick executor of ${distributedCoroutine.identifier}",
+                        e,
+                    )
+                }
+            }
+
+            override fun close() {
+                executor.shutdown()
+            }
+        }
     }
 
     /**

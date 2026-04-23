@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+### Added
+
+- `instances` parameter on `PostgresMessageQueue.subscribe(...)` — spins up N independent workers for a saga within a single JVM, each with its own serialised tick loop and `DistributedCoroutineIdentifier` instance UUID. Workers compete via Postgres `FOR UPDATE SKIP LOCKED`, the same mechanism used for multi-service horizontal scaling. Defaults to 1 (unchanged behaviour).
+- `PostgresMessageQueue.requiredConnectionCount` property — minimum number of database connections Scoop may hold concurrently for its registered workers' event loops (equal to the sum of `instances` across all subscriptions, including the internal `sleep-handler`). Intended as an assertion target in integration tests: `assertTrue(poolMaxSize >= messageQueue.requiredConnectionCount)`.
+
+### Changed
+
+- `EventLoop.tickPeriodically` now returns a `PeriodicTick` handle (superseding the previous `AutoCloseable` return). `PeriodicTick.trigger()` queues an ad-hoc tick on the same single-thread executor that drives the schedule, so scheduled ticks and LISTEN/NOTIFY-driven wake-ups are serialised per saga identifier. Triggers that arrive while another tick is pending or running are coalesced — at most one tick is ever queued on the executor — so bursts of LISTEN/NOTIFY traffic cannot grow the queue unboundedly.
+
+### Fixed
+
+- LISTEN/NOTIFY callbacks for a subscribed saga no longer run on virtual threads concurrently with the scheduled tick — they are now funneled through the saga's single-thread tick executor. Previously a single worker could process multiple messages in parallel via two tick entry points, which defeated the "one `DistributedCoroutineIdentifier` = one serial worker" model; parallelism now comes exclusively from `instances > 1`.
+
 ## v0.2.8 — 2026-04-06
 
 ### Fixed
