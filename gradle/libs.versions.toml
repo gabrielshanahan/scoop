@@ -1,6 +1,6 @@
 [versions]
 kotlin = "2.1.20"              # checked: 2026-03-10
-quarkus = "3.32.3"             # checked: 2026-03-30
+quarkus = "3.34.6"             # checked: 2026-03-30
 ktfmt = "0.25.0"               # checked: 2026-03-10
 detekt = "1.23.8"              # checked: 2026-03-10
 fluentjdbc = "1.8.6"           # checked: 2026-03-10
