@@ -30,6 +30,21 @@ import org.postgresql.jdbc.PgConnection
 import org.slf4j.LoggerFactory
 
 /**
+ * Maximum time [PeriodicTick.close] will block on [java.util.concurrent.ExecutorService.awaitTermination]
+ * waiting for an in-flight tick to finish gracefully. Bounded so a stuck tick (e.g. a hung DB
+ * query) cannot deadlock application shutdown indefinitely.
+ */
+private const val SHUTDOWN_TIMEOUT_SECONDS = 10L
+
+/**
+ * Additional time [PeriodicTick.close] will wait after issuing an interrupt
+ * ([java.util.concurrent.ExecutorService.shutdownNow]) when the soft shutdown timed out. Short on
+ * purpose: the tick should respond to the interrupt by throwing out of its DB call within a
+ * handful of milliseconds; if it does not, the surrounding application is in trouble regardless.
+ */
+private const val SHUTDOWN_INTERRUPT_TIMEOUT_SECONDS = 2L
+
+/**
  * The core execution engine that drives structured cooperation by resuming suspended sagas.
  *
  * The [EventLoop] is the heart of Scoop's execution model. It implements the "event loop" pattern
@@ -108,7 +123,11 @@ class EventLoop(
      * @param topic The message topic this saga is subscribed to
      * @param distributedCoroutine The saga definition to execute
      */
-    fun tick(topic: String, distributedCoroutine: DistributedCoroutine) {
+    fun tick(
+        topic: String,
+        distributedCoroutine: DistributedCoroutine,
+        isShuttingDown: () -> Boolean = { false },
+    ) {
         try {
             fluentJdbc.transactional { connection ->
                 try {
@@ -156,7 +175,16 @@ class EventLoop(
                 }
             }
         } catch (e: Exception) {
-            logger.error("Error in when ticking", e)
+            // During application shutdown, the surrounding [DataSource] and CDI container can be
+            // torn down concurrently with our @PreDestroy chain — see
+            // [PostgresMessageQueue.close]. Any tick that races teardown will throw at
+            // connection acquisition time. That's expected, not actionable: surfacing it as an
+            // ERROR floods the log. Demote to debug.
+            if (isShuttingDown()) {
+                logger.debug("Tick failure during shutdown for ${distributedCoroutine.identifier}", e)
+            } else {
+                logger.error("Error in when ticking", e)
+            }
         }
     }
 
@@ -184,6 +212,7 @@ class EventLoop(
         topic: String,
         distributedCoroutine: DistributedCoroutine,
         runApproximatelyEvery: Duration,
+        isShuttingDown: () -> Boolean = { false },
     ): PeriodicTick {
         val executor =
             Executors.newSingleThreadScheduledExecutor { r ->
@@ -205,7 +234,7 @@ class EventLoop(
                 logger.debug(
                     "Starting tick for topic $topic and coroutine ${distributedCoroutine.identifier}"
                 )
-                tick(topic, distributedCoroutine)
+                tick(topic, distributedCoroutine, isShuttingDown)
             } catch (e: Exception) {
                 logger.error("Event loop for ${distributedCoroutine.identifier} failed", e)
             } finally {
@@ -214,6 +243,11 @@ class EventLoop(
         }
 
         val scheduledTick = Runnable {
+            // Skip new ticks once the surrounding queue has signalled shutdown — the in-flight
+            // tick on this executor (if any) is still allowed to finish, but no fresh tick will
+            // start. Combined with `isShuttingDown` being checked inside [tick]'s catch, this
+            // prevents the noisy "Error in when ticking" log spam during Quarkus / Agroal teardown.
+            if (isShuttingDown()) return@Runnable
             // Scheduled fires on a fixed cadence, but if a triggered tick is already pending or
             // running this tick collapses to a no-op — the in-flight one will do the work.
             if (!gate.tryAcquire()) return@Runnable
@@ -246,7 +280,31 @@ class EventLoop(
             }
 
             override fun close() {
+                // Stop accepting new submissions and cancel future periodic firings, then block
+                // until any in-flight tick has finished. Without the await, close() returns while
+                // the executor's worker thread is mid-`tick(...)`, and that tick keeps running on
+                // its own thread after the caller has moved on. In a Quarkus shutdown scenario the
+                // caller's @PreDestroy returns, Quarkus tears down ArC and Agroal in parallel, and
+                // the still-running tick fails to acquire a connection — producing the
+                // "Error in when ticking" / "pool is closed" / "ArC container not initialized"
+                // log spam that motivated this fix.
+                //
+                // If a tick is genuinely stuck past the soft timeout (e.g. a long-running
+                // rollback transaction), fall back to interrupt + brief secondary await so
+                // close() never returns while a tick thread is still alive holding row locks
+                // (which would deadlock the next test's @BeforeEach TRUNCATE).
                 executor.shutdown()
+                if (!executor.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    logger.warn(
+                        "Tick executor for ${distributedCoroutine.identifier} did not terminate within $SHUTDOWN_TIMEOUT_SECONDS s; interrupting"
+                    )
+                    executor.shutdownNow()
+                    if (!executor.awaitTermination(SHUTDOWN_INTERRUPT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                        logger.warn(
+                            "Tick executor for ${distributedCoroutine.identifier} did not terminate even after shutdownNow; thread may still be running"
+                        )
+                    }
+                }
             }
         }
     }

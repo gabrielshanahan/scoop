@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+### Changed
+
+- `PostgresMessageQueue` now implements `AutoCloseable`. The Quarkus `ScoopProducer` registers a CDI `@Disposes` method that calls `messageQueue.close()` on bean destroy, which stops the internal `sleep-handler` subscription before the surrounding `DataSource` tears down.
+
+### Fixed
+
+- `Subscription.close()` now blocks until in-flight ticks have actually drained: `PeriodicTick.close()` calls `executor.awaitTermination(...)` after `shutdown()`, with a `shutdownNow()` fallback if the soft timeout expires. Previously close() returned immediately and ticks kept running on their daemon thread; combined with Quarkus tearing down ArC and Agroal in parallel with `@PreDestroy`, this produced unbounded `Error in when ticking` / `pool is closed` / `ArC container not initialized` log spam during application shutdown. Tick-failure logs are also demoted to DEBUG once the queue is shutting down, silencing the racy log lines that fire during the @PreDestroy / Agroal teardown window.
+
 ## v0.2.9 — 2026-04-23
 
 ### Added

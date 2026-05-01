@@ -16,6 +16,7 @@ import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import org.postgresql.util.PGobject
 import org.slf4j.LoggerFactory
 
@@ -42,20 +43,37 @@ class PostgresMessageQueue(
     private val messageRepository: MessageRepository,
     private val eventLoop: EventLoop,
     private val tickInterval: Duration = DEFAULT_TICK_INTERVAL,
-) : HandlerRegistry {
+) : HandlerRegistry, AutoCloseable {
 
     private val topicsToCoroutines =
         ConcurrentHashMap.newKeySet<Pair<String, DistributedCoroutineIdentifier>>()
 
-    /** This is explained in [SLEEP_TOPIC]. */
-    init {
+    /**
+     * Set to true once [close] is invoked. All [PeriodicTick]s created by [subscribe] read this
+     * via the `isShuttingDown` parameter to [EventLoop.tickPeriodically]: scheduled ticks become
+     * no-ops, and any in-flight tick that throws (e.g. because Agroal has already been closed by
+     * Quarkus) demotes the failure log from ERROR to DEBUG. This is what eliminates the
+     * "Error in when ticking" / "pool is closed" / "ArC container not initialized" log spam
+     * during application shutdown — the @PreDestroy ordering between Scoop and Agroal is racy in
+     * practice, so the noise has to be suppressed at the source.
+     */
+    private val shuttingDown = AtomicBoolean(false)
+
+    /**
+     * Internal sleep-handler subscription used by [SLEEP_TOPIC]. Held so [close] can stop it
+     * before the surrounding application's [DataSource][javax.sql.DataSource] tears down — without
+     * this, the sleep-handler ticker keeps polling Postgres after user-side subscriptions are
+     * gone and produces the same "Error in when ticking" log spam at shutdown that motivated the
+     * blocking [PeriodicTick.close][io.github.gabrielshanahan.scoop.coroutine.PeriodicTick.close]
+     * contract.
+     */
+    private val internalSleepSubscription: Subscription =
         subscribe(
             SLEEP_TOPIC,
             saga("sleep-handler", SleepEventLoopStrategy(OffsetDateTime.now())) {
                 step("sleep") { _, _ -> }
             },
         )
-    }
 
     /** Fetches a message, given its [messageId]. */
     fun fetch(connection: Connection, messageId: UUID): Message? =
@@ -143,7 +161,13 @@ class PostgresMessageQueue(
 
         val workerHandles =
             workerSagas.map { workerSaga ->
-                val periodicTick = eventLoop.tickPeriodically(topic, workerSaga, tickInterval)
+                val periodicTick =
+                    eventLoop.tickPeriodically(
+                        topic,
+                        workerSaga,
+                        tickInterval,
+                        isShuttingDown = { shuttingDown.get() },
+                    )
                 // Route the NOTIFY callback through the worker's own single-thread executor so
                 // that push-driven ticks never run concurrently with the scheduled tick — each
                 // worker stays strictly serial, and parallelism comes only from `instances`.
@@ -197,6 +221,26 @@ class PostgresMessageQueue(
      */
     val requiredConnectionCount: Int
         get() = topicsToCoroutines.size
+
+    /**
+     * Stops the internal sleep-handler subscription. Application-owned subscriptions returned by
+     * [subscribe] are owned by the caller and must be closed by the caller.
+     *
+     * In a Quarkus/CDI deployment this is wired through a CDI disposer (see scoop-quarkus's
+     * `ScoopProducer`) so that the sleep-handler stops ticking before Quarkus tears down the
+     * surrounding [DataSource][javax.sql.DataSource]. Without it, the sleep-handler's periodic
+     * tick keeps firing after user-side subscriptions are closed, hits a half-torn-down Agroal
+     * pool, and produces the `Error in when ticking` log spam this fix is designed to eliminate.
+     */
+    override fun close() {
+        // Set the shutdown flag *before* closing anything: every [PeriodicTick] created via
+        // [subscribe] (the internal sleep-handler plus all user-side subscriptions) reads this
+        // through the `isShuttingDown` callback wired into [EventLoop.tickPeriodically], so once
+        // it flips no new tick will start and any in-flight tick that throws will log at debug.
+        // This silences the log spam during the racy @PreDestroy / Agroal teardown window.
+        shuttingDown.set(true)
+        internalSleepSubscription.close()
+    }
 
     companion object {
         private val logger = LoggerFactory.getLogger(PostgresMessageQueue::class.java)
