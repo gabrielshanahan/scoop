@@ -13,6 +13,7 @@ import io.github.gabrielshanahan.scoop.messaging.PostgresMessageQueue
 import io.github.gabrielshanahan.scoop.messaging.TopicNotifier
 import io.vertx.pgclient.pubsub.PgSubscriber
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Disposes
 import jakarta.enterprise.inject.Produces
 import java.time.Duration
 import org.codejargon.fluentjdbc.api.FluentJdbc
@@ -93,4 +94,15 @@ class ScoopProducer(
             eventLoop,
             Duration.ofMillis(tickIntervalMs),
         )
+
+    /**
+     * Closes [PostgresMessageQueue]'s internal sleep-handler subscription on bean destroy so its
+     * periodic tick stops before Quarkus tears down the Agroal [DataSource][javax.sql.DataSource].
+     * Without this disposer the sleep-handler ticker keeps polling Postgres through Quarkus
+     * shutdown and produces "Error in when ticking" log spam every time the surrounding test or
+     * application exits.
+     */
+    fun disposeMessageQueue(@Disposes messageQueue: PostgresMessageQueue) {
+        messageQueue.close()
+    }
 }

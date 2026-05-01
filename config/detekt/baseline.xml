@@ -64,7 +64,7 @@
     <ID>MemberNameEqualsClassName:PendingCoroutineRunSqlTest.kt$PendingCoroutineRunSqlTest.FinalSelect$val finalSelect = finalSelect(registryStrategy)</ID>
     <ID>MemberNameEqualsClassName:PendingCoroutineRunSqlTest.kt$PendingCoroutineRunSqlTest.SeenForProcessing$val seenForProcessing = seenForProcessing(registryStrategy)</ID>
     <ID>ReturnCount:CooperationContextMap.kt$CooperationContextMap$@Suppress("UNCHECKED_CAST") override fun &lt;E : CooperationContext.Element&gt; get(key: CooperationContext.Key&lt;E&gt;): E?</ID>
-    <ID>ThrowsCount:EventLoop.kt$EventLoop$fun tick(topic: String, distributedCoroutine: DistributedCoroutine)</ID>
+    <ID>ThrowsCount:EventLoop.kt$EventLoop$fun tick( topic: String, distributedCoroutine: DistributedCoroutine, isShuttingDown: () -&gt; Boolean = { false }, )</ID>
     <ID>ThrowsCount:RollbackPathTest.kt$RollbackPathTest$@Test fun `a handler failing in its second step should emit ROLLBACK_EMITTEDs for messages emitted in the first step, and then roll it back`()</ID>
     <ID>ThrowsCount:RollbackPathTest.kt$RollbackPathTest$@Test fun `failed rollbacks are well behaved n-deep`()</ID>
     <ID>ThrowsCount:RollbackPathTest.kt$RollbackPathTest$@Test fun `when a child fails, rollbacks happen in reverse order`()</ID>
