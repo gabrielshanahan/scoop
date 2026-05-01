@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+## v0.2.10 — 2026-05-01
+
 ### Added
 
 - `PostgresMessageQueue.pauseTicks()` / `resumeTicks()` — temporarily pauses the scheduled-tick path on every active subscription (including the internal `sleep-handler`). Intended for test fixtures that need to TRUNCATE Scoop's tables without racing live ticks; without it, TRUNCATE's `AccessExclusiveLock` deadlocks with the tick's `AccessShareLock` from `SELECT FOR UPDATE SKIP LOCKED`.
