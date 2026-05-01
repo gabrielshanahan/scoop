@@ -52,30 +52,29 @@ class PostgresMessageQueue(
      * Set to true once [close] is invoked. All [PeriodicTick]s created by [subscribe] read this
      * (along with [ticksPaused], see below) via the `isShuttingDown` parameter to
      * [EventLoop.tickPeriodically]: scheduled ticks become no-ops, and any in-flight tick that
-     * throws (e.g. because Agroal has already been closed by Quarkus) demotes the failure log
-     * from ERROR to DEBUG. This is what eliminates the "Error in when ticking" / "pool is closed"
-     * / "ArC container not initialized" log spam during application shutdown — the @PreDestroy
-     * ordering between Scoop and Agroal is racy in practice, so the noise has to be suppressed at
-     * the source.
+     * throws (e.g. because Agroal has already been closed by Quarkus) demotes the failure log from
+     * ERROR to DEBUG. This is what eliminates the "Error in when ticking" / "pool is closed" / "ArC
+     * container not initialized" log spam during application shutdown — the @PreDestroy ordering
+     * between Scoop and Agroal is racy in practice, so the noise has to be suppressed at the
+     * source.
      */
     private val shuttingDown = AtomicBoolean(false)
 
     /**
      * Set/cleared by [pauseTicks] / [resumeTicks]. Same effect on the tick path as [shuttingDown]
-     * (skip new ticks; demote failure logs), but reversible — intended for test fixtures that
-     * need to TRUNCATE Scoop's tables without racing the always-on internal sleep-handler tick.
-     * Without this pause, TRUNCATE's AccessExclusiveLock deadlocks with the tick's AccessShareLock
-     * during `@BeforeEach` cleanup.
+     * (skip new ticks; demote failure logs), but reversible — intended for test fixtures that need
+     * to TRUNCATE Scoop's tables without racing the always-on internal sleep-handler tick. Without
+     * this pause, TRUNCATE's AccessExclusiveLock deadlocks with the tick's AccessShareLock during
+     * `@BeforeEach` cleanup.
      */
     private val ticksPaused = AtomicBoolean(false)
 
     /**
-     * Internal sleep-handler subscription used by [SLEEP_TOPIC]. Held so [close] can stop it
-     * before the surrounding application's [DataSource][javax.sql.DataSource] tears down — without
-     * this, the sleep-handler ticker keeps polling Postgres after user-side subscriptions are
-     * gone and produces the same "Error in when ticking" log spam at shutdown that motivated the
-     * blocking [PeriodicTick.close][io.github.gabrielshanahan.scoop.coroutine.PeriodicTick.close]
-     * contract.
+     * Internal sleep-handler subscription used by [SLEEP_TOPIC]. Held so [close] can stop it before
+     * the surrounding application's [DataSource][javax.sql.DataSource] tears down — without this,
+     * the sleep-handler ticker keeps polling Postgres after user-side subscriptions are gone and
+     * produces the same "Error in when ticking" log spam at shutdown that motivated the blocking
+     * [PeriodicTick.close][io.github.gabrielshanahan.scoop.coroutine.PeriodicTick.close] contract.
      */
     private val internalSleepSubscription: Subscription =
         subscribe(
@@ -256,9 +255,9 @@ class PostgresMessageQueue(
      *
      * In a Quarkus/CDI deployment this is wired through a CDI disposer (see scoop-quarkus's
      * `ScoopProducer`) so that the sleep-handler stops ticking before Quarkus tears down the
-     * surrounding [DataSource][javax.sql.DataSource]. Without it, the sleep-handler's periodic
-     * tick keeps firing after user-side subscriptions are closed, hits a half-torn-down Agroal
-     * pool, and produces the `Error in when ticking` log spam this fix is designed to eliminate.
+     * surrounding [DataSource][javax.sql.DataSource]. Without it, the sleep-handler's periodic tick
+     * keeps firing after user-side subscriptions are closed, hits a half-torn-down Agroal pool, and
+     * produces the `Error in when ticking` log spam this fix is designed to eliminate.
      */
     override fun close() {
         // Set the shutdown flag *before* closing anything: every [PeriodicTick] created via

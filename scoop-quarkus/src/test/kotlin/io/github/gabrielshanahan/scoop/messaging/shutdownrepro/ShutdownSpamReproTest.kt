@@ -37,8 +37,7 @@ class ShutdownSpamReproTest {
     // Direct @Inject forces the registrar to be instantiated; we don't rely on
     // @Startup eagerness, which has historically been flaky for beans declared
     // in src/test/kotlin under @TestProfile-isolated containers.
-    @Inject
-    lateinit var registrar: ReproSubscriptionRegistrar
+    @Inject lateinit var registrar: ReproSubscriptionRegistrar
 
     @Test
     fun `subscriptions leak past test end so quarkus shutdown races scoop ticks`() {

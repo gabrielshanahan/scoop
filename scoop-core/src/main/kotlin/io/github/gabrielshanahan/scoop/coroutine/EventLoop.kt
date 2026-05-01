@@ -30,17 +30,18 @@ import org.postgresql.jdbc.PgConnection
 import org.slf4j.LoggerFactory
 
 /**
- * Maximum time [PeriodicTick.close] will block on [java.util.concurrent.ExecutorService.awaitTermination]
- * waiting for an in-flight tick to finish gracefully. Bounded so a stuck tick (e.g. a hung DB
- * query) cannot deadlock application shutdown indefinitely.
+ * Maximum time [PeriodicTick.close] will block on
+ * [java.util.concurrent.ExecutorService.awaitTermination] waiting for an in-flight tick to finish
+ * gracefully. Bounded so a stuck tick (e.g. a hung DB query) cannot deadlock application shutdown
+ * indefinitely.
  */
 private const val SHUTDOWN_TIMEOUT_SECONDS = 10L
 
 /**
  * Additional time [PeriodicTick.close] will wait after issuing an interrupt
  * ([java.util.concurrent.ExecutorService.shutdownNow]) when the soft shutdown timed out. Short on
- * purpose: the tick should respond to the interrupt by throwing out of its DB call within a
- * handful of milliseconds; if it does not, the surrounding application is in trouble regardless.
+ * purpose: the tick should respond to the interrupt by throwing out of its DB call within a handful
+ * of milliseconds; if it does not, the surrounding application is in trouble regardless.
  */
 private const val SHUTDOWN_INTERRUPT_TIMEOUT_SECONDS = 2L
 
@@ -181,7 +182,10 @@ class EventLoop(
             // connection acquisition time. That's expected, not actionable: surfacing it as an
             // ERROR floods the log. Demote to debug.
             if (isShuttingDown()) {
-                logger.debug("Tick failure during shutdown for ${distributedCoroutine.identifier}", e)
+                logger.debug(
+                    "Tick failure during shutdown for ${distributedCoroutine.identifier}",
+                    e,
+                )
             } else {
                 logger.error("Error in when ticking", e)
             }
@@ -299,7 +303,12 @@ class EventLoop(
                         "Tick executor for ${distributedCoroutine.identifier} did not terminate within $SHUTDOWN_TIMEOUT_SECONDS s; interrupting"
                     )
                     executor.shutdownNow()
-                    if (!executor.awaitTermination(SHUTDOWN_INTERRUPT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    if (
+                        !executor.awaitTermination(
+                            SHUTDOWN_INTERRUPT_TIMEOUT_SECONDS,
+                            TimeUnit.SECONDS,
+                        )
+                    ) {
                         logger.warn(
                             "Tick executor for ${distributedCoroutine.identifier} did not terminate even after shutdownNow; thread may still be running"
                         )
