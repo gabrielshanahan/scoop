@@ -50,14 +50,24 @@ class PostgresMessageQueue(
 
     /**
      * Set to true once [close] is invoked. All [PeriodicTick]s created by [subscribe] read this
-     * via the `isShuttingDown` parameter to [EventLoop.tickPeriodically]: scheduled ticks become
-     * no-ops, and any in-flight tick that throws (e.g. because Agroal has already been closed by
-     * Quarkus) demotes the failure log from ERROR to DEBUG. This is what eliminates the
-     * "Error in when ticking" / "pool is closed" / "ArC container not initialized" log spam
-     * during application shutdown — the @PreDestroy ordering between Scoop and Agroal is racy in
-     * practice, so the noise has to be suppressed at the source.
+     * (along with [ticksPaused], see below) via the `isShuttingDown` parameter to
+     * [EventLoop.tickPeriodically]: scheduled ticks become no-ops, and any in-flight tick that
+     * throws (e.g. because Agroal has already been closed by Quarkus) demotes the failure log
+     * from ERROR to DEBUG. This is what eliminates the "Error in when ticking" / "pool is closed"
+     * / "ArC container not initialized" log spam during application shutdown — the @PreDestroy
+     * ordering between Scoop and Agroal is racy in practice, so the noise has to be suppressed at
+     * the source.
      */
     private val shuttingDown = AtomicBoolean(false)
+
+    /**
+     * Set/cleared by [pauseTicks] / [resumeTicks]. Same effect on the tick path as [shuttingDown]
+     * (skip new ticks; demote failure logs), but reversible — intended for test fixtures that
+     * need to TRUNCATE Scoop's tables without racing the always-on internal sleep-handler tick.
+     * Without this pause, TRUNCATE's AccessExclusiveLock deadlocks with the tick's AccessShareLock
+     * during `@BeforeEach` cleanup.
+     */
+    private val ticksPaused = AtomicBoolean(false)
 
     /**
      * Internal sleep-handler subscription used by [SLEEP_TOPIC]. Held so [close] can stop it
@@ -166,7 +176,7 @@ class PostgresMessageQueue(
                         topic,
                         workerSaga,
                         tickInterval,
-                        isShuttingDown = { shuttingDown.get() },
+                        isShuttingDown = { shuttingDown.get() || ticksPaused.get() },
                     )
                 // Route the NOTIFY callback through the worker's own single-thread executor so
                 // that push-driven ticks never run concurrently with the scheduled tick — each
@@ -221,6 +231,24 @@ class PostgresMessageQueue(
      */
     val requiredConnectionCount: Int
         get() = topicsToCoroutines.size
+
+    /**
+     * Pauses the scheduled-tick path on every active subscription, including the internal
+     * sleep-handler. Currently in-flight ticks are still allowed to finish; after a brief wait
+     * (longer than the tick interval) no new tick will start until [resumeTicks] is called.
+     *
+     * Intended for test fixtures that need to TRUNCATE Scoop's tables without racing live ticks
+     * (TRUNCATE's `AccessExclusiveLock` deadlocks with the tick's `AccessShareLock`). Production
+     * code should not need this — application shutdown uses [close] instead.
+     */
+    fun pauseTicks() {
+        ticksPaused.set(true)
+    }
+
+    /** Re-enables the scheduled-tick path. Companion to [pauseTicks]. */
+    fun resumeTicks() {
+        ticksPaused.set(false)
+    }
 
     /**
      * Stops the internal sleep-handler subscription. Application-owned subscriptions returned by

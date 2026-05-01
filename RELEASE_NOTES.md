@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+### Added
+
+- `PostgresMessageQueue.pauseTicks()` / `resumeTicks()` — temporarily pauses the scheduled-tick path on every active subscription (including the internal `sleep-handler`). Intended for test fixtures that need to TRUNCATE Scoop's tables without racing live ticks; without it, TRUNCATE's `AccessExclusiveLock` deadlocks with the tick's `AccessShareLock` from `SELECT FOR UPDATE SKIP LOCKED`.
+
 ### Changed
 
 - `PostgresMessageQueue` now implements `AutoCloseable`. The Quarkus `ScoopProducer` registers a CDI `@Disposes` method that calls `messageQueue.close()` on bean destroy, which stops the internal `sleep-handler` subscription before the surrounding `DataSource` tears down.

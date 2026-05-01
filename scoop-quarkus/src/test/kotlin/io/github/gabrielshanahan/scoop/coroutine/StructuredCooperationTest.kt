@@ -28,9 +28,21 @@ abstract class StructuredCooperationTest {
 
     @BeforeEach
     fun cleanupDatabase() {
-        fluentJdbc
-            .query()
-            .update("TRUNCATE TABLE message_event, message, return_value CASCADE")
-            .run()
+        // Pause the always-on internal sleep-handler subscription's periodic tick before
+        // TRUNCATE. Without the pause, TRUNCATE's AccessExclusiveLock deadlocks with the
+        // tick's AccessShareLock from `SELECT FOR UPDATE SKIP LOCKED`. The pause flag is
+        // checked by the scheduled-tick path, so new ticks won't start; sleeping slightly
+        // longer than the tick interval lets any in-flight tick drain before TRUNCATE runs.
+        messageQueue.pauseTicks()
+        try {
+            // 60 ms = tick interval (50 ms) + safety margin.
+            Thread.sleep(60)
+            fluentJdbc
+                .query()
+                .update("TRUNCATE TABLE message_event, message, return_value CASCADE")
+                .run()
+        } finally {
+            messageQueue.resumeTicks()
+        }
     }
 }
