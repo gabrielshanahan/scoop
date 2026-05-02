@@ -9,9 +9,8 @@ import org.junit.jupiter.api.Test
 // Hack-test, not a clean unit test. The work is done by ReproSubscriptionRegistrar
 // (eagerly @Startup, leaks subscriptions across the test boundary). This test method
 // only exists to make Quarkus boot. The reproduction signal lands in the gradle log
-// AFTER the test completes, while Quarkus is shutting down the test container —
-// see plan in /Users/gabriel.shanahan/.claude/plans/here-s-the-description-of-federated-clover.md
-// and the recipe in repro-findings.md for how to interpret the captured log.
+// AFTER the test completes, while Quarkus is shutting down the test container — grep the
+// captured log for "Error in when ticking" to see the symptom (zero matches under the fix).
 //
 // @TestProfile forces Quarkus to use a fresh container for this class (any non-default
 // config override does the job), so the subscriptions leaked here and the @PreDestroy

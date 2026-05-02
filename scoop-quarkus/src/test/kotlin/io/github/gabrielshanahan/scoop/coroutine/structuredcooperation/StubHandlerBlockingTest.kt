@@ -22,9 +22,10 @@ import org.junit.jupiter.api.TestInstance
  * Tests that a saga step properly blocks when a handler is registered in the topology but NOT
  * subscribed to the event loop (a "stub handler").
  *
- * This reproduces the scenario from Topiari where a "HumanHandler" is declared in the topology for
- * the "who is listening" check, but is never actually subscribed. The expectation is that the
- * parent saga does NOT resume until someone externally writes SEEN + COMMITTED events for the stub
+ * Models the pattern where a handler is declared in the topology purely to satisfy the "who is
+ * listening" check, but is never actually subscribed in-process — for example, a human-driven step
+ * where a user (or some external system) is expected to write SEEN + COMMITTED events out-of-band.
+ * The expectation is that the parent saga does NOT resume until those events appear for the stub
  * handler.
  */
 @QuarkusTest
@@ -35,8 +36,8 @@ class StubHandlerBlockingTest : StructuredCooperationTest() {
     private val stubHandlerName = "stub-handler"
 
     /**
-     * Creates an event loop strategy that includes the stub handler in the topology, simulating
-     * what Topiari does with HumanHandler.
+     * Creates an event loop strategy that includes the stub handler in the topology, modelling the
+     * human-handler / out-of-band-COMMITTED pattern described in the class kdoc.
      */
     private fun strategyWithStubHandler() =
         StandardEventLoopStrategy(OffsetDateTime.now()) {

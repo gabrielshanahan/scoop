@@ -10,12 +10,12 @@ import jakarta.annotation.PreDestroy
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 
-// Hack-test fixture, not a production component. Mirrors topiari's SagaRegistrar
-// so that during Quarkus shutdown, @PreDestroy calls Subscription.close() while
-// the periodic-tick executors are still polling Postgres. Under broken scoop,
-// close() returns before in-flight ticks finish, so ticks fire during ArC/Agroal
-// teardown and log "Error in when ticking" repeatedly — that spam is the symptom
-// the recipe in this package is designed to capture.
+// Hack-test fixture, not a production component. Models the typical application-side pattern:
+// a CDI bean that registers subscriptions on startup and closes them in @PreDestroy. The
+// shutdown contract under test is that close() must drain in-flight ticks before returning, so
+// when Quarkus tears down ArC and Agroal in parallel with @PreDestroy, no tick keeps running
+// against a half-closed DataSource. Without that contract, the executors keep polling and
+// produce the "Error in when ticking" log spam this package's recipe captures.
 @Startup
 @ApplicationScoped
 class ReproSubscriptionRegistrar
