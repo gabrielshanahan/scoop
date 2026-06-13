@@ -49,6 +49,7 @@
     <ID>MagicNumber:util.kt$999999000</ID>
     <ID>MagicNumber:EventLoop.kt$EventLoop$0.02</ID>
     <ID>TooManyFunctions:EventLoop.kt$EventLoop</ID>
+    <ID>TooManyFunctions:ScoopProducer.kt$ScoopProducer</ID>
     <ID>MagicNumber:utils.kt$0.02</ID>
     <ID>MatchingDeclarationName:PendingCoroutineRunSql.kt$SQL</ID>
     <ID>MaxLineLength:DeadlineTest.kt$DeadlineTest$"[root handler] MissedHappyPathDeadline: Missed happy path deadline of root handler at ${deadline.get().deadline.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)}. Deadline trace: [{\"HappyPathDeadlineKey\": {\"trace\": [], \"source\": \"root system\", \"deadline\": \"9999-12-31T23:59:59.999999Z\"}}]"</ID>

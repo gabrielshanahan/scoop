@@ -29,6 +29,7 @@ quarkus-jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson
 quarkus-jdbc-postgresql = { module = "io.quarkus:quarkus-jdbc-postgresql" }
 quarkus-fluentjdbc = { module = "io.quarkiverse.fluentjdbc:quarkus-fluentjdbc", version.ref = "quarkus-fluentjdbc" }
 quarkus-reactive-pg-client = { module = "io.quarkus:quarkus-reactive-pg-client" }
+quarkus-narayana-jta = { module = "io.quarkus:quarkus-narayana-jta" }
 quarkus-arc = { module = "io.quarkus:quarkus-arc" }
 quarkus-kotlin = { module = "io.quarkus:quarkus-kotlin" }
 quarkus-junit5 = { module = "io.quarkus:quarkus-junit5" }

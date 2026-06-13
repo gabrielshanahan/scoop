@@ -3,6 +3,7 @@ package io.github.gabrielshanahan.scoop
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import io.github.gabrielshanahan.scoop.coroutine.EventLoop
+import io.github.gabrielshanahan.scoop.coroutine.FluentJdbcTransactionRunner
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContextModule
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.Capabilities
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.MessageEventRepository
@@ -63,7 +64,15 @@ private constructor(
             val returnValueRepository = ReturnValueRepository(fluentJdbc)
             val capabilities =
                 Capabilities(messageRepository, messageEventRepository, returnValueRepository)
-            val eventLoop = EventLoop(fluentJdbc, messageEventRepository, capabilities, jsonbHelper)
+            val transactionRunner = FluentJdbcTransactionRunner(fluentJdbc)
+            val eventLoop =
+                EventLoop(
+                    fluentJdbc,
+                    messageEventRepository,
+                    capabilities,
+                    jsonbHelper,
+                    transactionRunner,
+                )
             val messageQueue =
                 PostgresMessageQueue(
                     topicNotifier,

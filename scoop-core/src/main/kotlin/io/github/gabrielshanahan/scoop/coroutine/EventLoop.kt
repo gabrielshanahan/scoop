@@ -87,6 +87,7 @@ class EventLoop(
     private val messageEventRepository: MessageEventRepository,
     private val scopeCapabilities: ScopeCapabilities,
     private val jsonbHelper: JsonbHelper,
+    private val transactionRunner: TransactionRunner = FluentJdbcTransactionRunner(fluentJdbc),
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -149,7 +150,7 @@ class EventLoop(
             }
 
             whileISaySo { repeatCount, saySo ->
-                fluentJdbc.transactional { connection ->
+                transactionRunner.inStepTransaction { connection ->
                     try {
                         logger.debug(
                             "Run number $repeatCount for topic $topic and coroutine ${distributedCoroutine.identifier}"
@@ -157,7 +158,7 @@ class EventLoop(
                         val coroutineState =
                             fetchSomePendingCoroutineState(connection, distributedCoroutine)
                         if (coroutineState == null) {
-                            return@transactional
+                            return@inStepTransaction
                         }
                         saySo()
                         val continuationResult =

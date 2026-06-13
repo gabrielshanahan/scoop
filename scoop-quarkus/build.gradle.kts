@@ -32,6 +32,7 @@ dependencies {
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.fluentjdbc)
     implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.narayana.jta)
     implementation(libs.quarkus.arc)
     implementation(libs.quarkus.kotlin)
     testImplementation(libs.quarkus.junit5)
