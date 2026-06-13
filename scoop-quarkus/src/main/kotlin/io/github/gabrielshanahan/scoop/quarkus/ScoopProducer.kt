@@ -3,6 +3,7 @@ package io.github.gabrielshanahan.scoop.quarkus
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.gabrielshanahan.scoop.JsonbHelper
 import io.github.gabrielshanahan.scoop.coroutine.EventLoop
+import io.github.gabrielshanahan.scoop.coroutine.TransactionRunner
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.Capabilities
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.MessageEventRepository
 import io.github.gabrielshanahan.scoop.coroutine.structuredcooperation.ReturnValueRepository
@@ -16,6 +17,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Disposes
 import jakarta.enterprise.inject.Produces
 import java.time.Duration
+import javax.sql.DataSource
 import org.codejargon.fluentjdbc.api.FluentJdbc
 import org.eclipse.microprofile.config.inject.ConfigProperty
 
@@ -30,6 +32,7 @@ class ScoopProducer(
     private val fluentJdbc: FluentJdbc,
     private val objectMapper: ObjectMapper,
     private val pgSubscriber: PgSubscriber,
+    private val dataSource: DataSource,
     @ConfigProperty(name = "scoop.tick-interval-ms", defaultValue = "50")
     private val tickIntervalMs: Long,
 ) {
@@ -71,13 +74,30 @@ class ScoopProducer(
     @ApplicationScoped
     fun topicNotifier(): TopicNotifier = PgSubscriberTopicNotifier(pgSubscriber)
 
+    /**
+     * Produces the per-step [TransactionRunner]. Under Quarkus this is JTA-backed so that scoop's
+     * `message_event` writes and any `@Transactional` business code a step calls share the same
+     * Narayana transaction on the same Agroal connection, making the step atomic.
+     */
+    @Produces
+    @ApplicationScoped
+    fun transactionRunner(): TransactionRunner = JtaTransactionRunner(dataSource)
+
     @Produces
     @ApplicationScoped
     fun eventLoop(
         messageEventRepository: MessageEventRepository,
         scopeCapabilities: ScopeCapabilities,
         jsonbHelper: JsonbHelper,
-    ): EventLoop = EventLoop(fluentJdbc, messageEventRepository, scopeCapabilities, jsonbHelper)
+        transactionRunner: TransactionRunner,
+    ): EventLoop =
+        EventLoop(
+            fluentJdbc,
+            messageEventRepository,
+            scopeCapabilities,
+            jsonbHelper,
+            transactionRunner,
+        )
 
     @Produces
     @ApplicationScoped
