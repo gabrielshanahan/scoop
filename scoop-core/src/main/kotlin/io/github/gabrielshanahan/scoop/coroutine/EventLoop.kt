@@ -20,11 +20,13 @@ import java.sql.Connection
 import java.time.Duration
 import java.time.Instant
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
+import kotlin.math.pow
 import org.codejargon.fluentjdbc.api.FluentJdbc
 import org.postgresql.jdbc.PgConnection
 import org.slf4j.LoggerFactory
@@ -82,16 +84,55 @@ private const val SHUTDOWN_INTERRUPT_TIMEOUT_SECONDS = 2L
  * [PostgresMessageQueue.subscribe][io.github.gabrielshanahan.scoop.messaging.PostgresMessageQueue.subscribe]
  * to understand how this works.\
  */
+@Suppress("LongParameterList")
 class EventLoop(
     private val fluentJdbc: FluentJdbc,
     private val messageEventRepository: MessageEventRepository,
     private val scopeCapabilities: ScopeCapabilities,
     private val jsonbHelper: JsonbHelper,
     private val transactionRunner: TransactionRunner = FluentJdbcTransactionRunner(fluentJdbc),
+    // Exponential backoff for retries after a [ScoopInfrastructureException] (see below). Default
+    // ZERO base = "retry on every tick" (no added delay, no behavioural change vs. always-resume).
+    private val retryBackoffBase: Duration = Duration.ZERO,
+    private val retryBackoffMax: Duration = Duration.ZERO,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private fun Connection.backendPID(): Int = unwrap(PgConnection::class.java).backendPID
+
+    // ---- Infrastructure-failure retry backoff ---------------------------------------------------
+    // When resuming a saga throws a [ScoopInfrastructureException] (Scoop's OWN bookkeeping failed,
+    // e.g. a dead connection — NOT a saga-logic failure), the saga is NOT rolled back: the tick's
+    // transaction is rolled back and the saga is retried on a later tick. By default that retry
+    // happens on the very next tick. These two knobs let a caller spread retries out exponentially
+    // (base * 2^(attempt-1), capped at [retryBackoffMax]) so a persistently-dead connection is not
+    // hammered every tick. State is in-memory and per-run (keyed by the run's root message id):
+    // attempts reset to "retry immediately" whenever the run makes any progress, and are lost on a
+    // restart (a restart already retries from the last committed step, so that is harmless).
+    private val backoffAttempts = ConcurrentHashMap<UUID, Int>()
+    private val backoffUntil = ConcurrentHashMap<UUID, Instant>()
+
+    private fun isBackedOff(messageId: UUID): Boolean =
+        backoffUntil[messageId]?.let { Instant.now().isBefore(it) } ?: false
+
+    private fun recordInfraBackoff(messageId: UUID) {
+        if (retryBackoffBase.isZero) return // retry-every-tick: keep no state
+        val attempt = backoffAttempts.merge(messageId, 1, Int::plus) ?: 1
+        val rawMillis = retryBackoffBase.toMillis().toDouble() * 2.0.pow(attempt - 1)
+        val cappedMillis = minOf(rawMillis, retryBackoffMax.toMillis().toDouble()).toLong()
+        backoffUntil[messageId] = Instant.now().plusMillis(cappedMillis)
+        logger.debug(
+            "Infrastructure failure for run {}: attempt {}, backing off {}ms",
+            messageId,
+            attempt,
+            cappedMillis,
+        )
+    }
+
+    private fun clearBackoff(messageId: UUID) {
+        backoffAttempts.remove(messageId)
+        backoffUntil.remove(messageId)
+    }
 
     /**
      * Executes a single tick of the event loop for the given saga type.
@@ -125,6 +166,7 @@ class EventLoop(
      * @param topic The message topic this saga is subscribed to
      * @param distributedCoroutine The saga definition to execute
      */
+    @Suppress("LongMethod", "ThrowsCount")
     fun tick(
         topic: String,
         distributedCoroutine: DistributedCoroutine,
@@ -160,9 +202,30 @@ class EventLoop(
                         if (coroutineState == null) {
                             return@inStepTransaction
                         }
+                        val messageId = coroutineState.message.id
+                        // Honour an in-effect infrastructure-failure backoff: leave the run pending
+                        // and end this tick (no saySo) so it is retried on a later tick. With the
+                        // default ZERO backoff base this is never true (retry on every tick).
+                        if (isBackedOff(messageId)) {
+                            return@inStepTransaction
+                        }
                         saySo()
                         val continuationResult =
-                            resumeCoroutine(connection, distributedCoroutine, coroutineState)
+                            try {
+                                resumeCoroutine(connection, distributedCoroutine, coroutineState)
+                            } catch (e: ScoopInfrastructureException) {
+                                // Scoop's OWN bookkeeping failed (a dead connection, say) — NOT a
+                                // failure of saga logic. Do not roll the saga back: record a
+                                // backoff
+                                // and rethrow so this tick's transaction rolls back and the run is
+                                // retried, from its last committed step, on a later tick.
+                                recordInfraBackoff(messageId)
+                                throw e
+                            }
+
+                        // The run made progress (committed / suspended, or a genuine business-logic
+                        // rollback) — clear any infrastructure-failure backoff.
+                        clearBackoff(messageId)
 
                         if (continuationResult is Continuation.ContinuationResult.Failure) {
                             throw continuationResult.exception

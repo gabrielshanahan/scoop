@@ -5,6 +5,7 @@ import io.github.gabrielshanahan.scoop.coroutine.CooperationScopeIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
 import io.github.gabrielshanahan.scoop.coroutine.Handler
 import io.github.gabrielshanahan.scoop.coroutine.NextStep
+import io.github.gabrielshanahan.scoop.coroutine.ScoopInfrastructureException
 import io.github.gabrielshanahan.scoop.coroutine.TransactionalStep
 import io.github.gabrielshanahan.scoop.coroutine.VariableName
 import io.github.gabrielshanahan.scoop.coroutine.context.CooperationContext
@@ -346,6 +347,13 @@ internal abstract class BaseCooperationContinuation(
 
             // Execute the step logic and check for give-up conditions that arose during execution
             handleFailuresOrResume(lastStepResult).also { giveUpIfNecessary() }
+        } catch (e: ScoopInfrastructureException) {
+            // Scoop's OWN bookkeeping failed (e.g. a dead JDBC connection during giveUpIfNecessary
+            // or an emission write) — NOT a failure of the saga-defining code. Rethrow rather than
+            // turning it into a Failure: tick() rolls back this tick's transaction and the saga is
+            // retried from its last committed step on a later tick, instead of the whole saga
+            // (possibly a perpetual loop) being rolled back. See [ScoopInfrastructureException].
+            throw e
         } catch (e: Exception) {
             Continuation.ContinuationResult.Failure(e)
         }

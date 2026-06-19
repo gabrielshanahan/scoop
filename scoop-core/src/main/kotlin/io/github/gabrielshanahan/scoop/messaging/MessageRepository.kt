@@ -1,5 +1,6 @@
 package io.github.gabrielshanahan.scoop.messaging
 
+import io.github.gabrielshanahan.scoop.coroutine.asScoopInfrastructure
 import java.sql.Connection
 import java.time.ZoneOffset
 import java.util.UUID
@@ -80,7 +81,7 @@ class MessageRepository(private val fluentJdbc: FluentJdbc) {
      * - **Exception Propagation**: Message details included in distributed stack traces
      * - **Cooperation Lineage**: Message IDs link parent-child relationships in lineage hierarchy
      */
-    fun fetchMessage(connection: Connection, messageId: UUID): Message? =
+    fun fetchMessage(connection: Connection, messageId: UUID): Message? = asScoopInfrastructure {
         fluentJdbc
             .queryOn(connection)
             .select("SELECT id, topic, payload, created_at FROM message WHERE id = :messageId")
@@ -99,6 +100,7 @@ class MessageRepository(private val fluentJdbc: FluentJdbc) {
             }
             .orElse(null)
             .also { if (it == null) logger.debug("Message not found: id={}", messageId) }
+    }
 
     /**
      * Persists a new message to the message table and returns the complete message with generated
@@ -130,25 +132,27 @@ class MessageRepository(private val fluentJdbc: FluentJdbc) {
      * @throws RuntimeException if message insertion fails (wraps database exceptions)
      */
     fun insertMessage(connection: Connection, topic: String, payload: PGobject): Message =
-        // For PostgreSQL RETURNING clause, we need to use a regular fluentJdbc.select() query
-        fluentJdbc
-            .queryOn(connection)
-            .select(
-                "INSERT INTO message (topic, payload) VALUES (:topic, :payload) RETURNING id, created_at"
-            )
-            .namedParam("topic", topic)
-            .namedParam("payload", payload)
-            .singleResult { resultSet ->
-                Message(
-                    id = resultSet.getObject("id", UUID::class.java),
-                    topic = topic,
-                    payload = payload,
-                    createdAt =
-                        resultSet
-                            .getTimestamp("created_at")
-                            .toLocalDateTime()
-                            .atOffset(ZoneOffset.UTC),
+        asScoopInfrastructure {
+            // For PostgreSQL RETURNING clause, we need to use a regular fluentJdbc.select() query
+            fluentJdbc
+                .queryOn(connection)
+                .select(
+                    "INSERT INTO message (topic, payload) VALUES (:topic, :payload) RETURNING id, created_at"
                 )
-            }
-            .also { logger.debug("Inserted message: id={}, topic='{}'", it.id, topic) }
+                .namedParam("topic", topic)
+                .namedParam("payload", payload)
+                .singleResult { resultSet ->
+                    Message(
+                        id = resultSet.getObject("id", UUID::class.java),
+                        topic = topic,
+                        payload = payload,
+                        createdAt =
+                            resultSet
+                                .getTimestamp("created_at")
+                                .toLocalDateTime()
+                                .atOffset(ZoneOffset.UTC),
+                    )
+                }
+                .also { logger.debug("Inserted message: id={}, topic='{}'", it.id, topic) }
+        }
 }
