@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+## v0.3.1 — 2026-06-19
+
 ### Fixed
 
 - A transient failure of Scoop's **own** persistence (most often a dead/idle-closed JDBC connection used during its bookkeeping — `giveUpIfNecessary`, an emission write, a `message_event` write) no longer rolls the saga back. Such failures are now classified as `ScoopInfrastructureException` (wrapped at the repository boundary) and treated by the event loop as a transient tick failure: the tick's transaction is rolled back and the run is re-resumed from its last committed step on a later tick. Previously any exception raised while processing a step — including one from Scoop's own machinery — became a `Failure` and drove the saga into `ROLLING_BACK`, which for a perpetual (infinite-`GoTo`) saga unwound the entire accumulated loop history and killed the loop for good. Only failures originating in the saga-defining code (`invoke` / `rollback` / `handleChildFailures`) still drive rollback; deliberate logical signals (`ReturnValueAlreadyExistsException`, the `ScoopException` control signals) pass through unchanged, and `Error`s (OOM, …) are never caught.
