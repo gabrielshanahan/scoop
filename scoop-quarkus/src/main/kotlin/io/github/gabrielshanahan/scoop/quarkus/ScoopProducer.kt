@@ -28,6 +28,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
  * dependencies (FluentJdbc, ObjectMapper, PgSubscriber).
  */
 @ApplicationScoped
+@Suppress("LongParameterList")
 class ScoopProducer(
     private val fluentJdbc: FluentJdbc,
     private val objectMapper: ObjectMapper,
@@ -35,6 +36,17 @@ class ScoopProducer(
     private val dataSource: DataSource,
     @ConfigProperty(name = "scoop.tick-interval-ms", defaultValue = "50")
     private val tickIntervalMs: Long,
+    // Exponential backoff between retries after a ScoopInfrastructureException (Scoop's own
+    // bookkeeping failed, e.g. a dead connection — never a saga-logic failure, so never a
+    // rollback).
+    // Default "0s" base = retry on the very next tick (no backoff). Set a base (and a cap) to
+    // spread
+    // retries out as base * 2^(attempt-1), capped at the max, so a persistently-dead connection is
+    // not hammered every tick.
+    @ConfigProperty(name = "scoop.retry.infra-backoff-base", defaultValue = "0s")
+    private val retryBackoffBase: Duration,
+    @ConfigProperty(name = "scoop.retry.infra-backoff-max", defaultValue = "0s")
+    private val retryBackoffMax: Duration,
 ) {
 
     @Produces @ApplicationScoped fun jsonbHelper(): JsonbHelper = JsonbHelper(objectMapper)
@@ -97,6 +109,8 @@ class ScoopProducer(
             scopeCapabilities,
             jsonbHelper,
             transactionRunner,
+            retryBackoffBase = retryBackoffBase,
+            retryBackoffMax = retryBackoffMax,
         )
 
     @Produces

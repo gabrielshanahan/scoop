@@ -2,6 +2,7 @@ package io.github.gabrielshanahan.scoop.coroutine.structuredcooperation
 
 import io.github.gabrielshanahan.scoop.coroutine.Handler
 import io.github.gabrielshanahan.scoop.coroutine.VariableName
+import io.github.gabrielshanahan.scoop.coroutine.asScoopInfrastructure
 import io.github.gabrielshanahan.scoop.coroutine.handlerName
 import io.github.gabrielshanahan.scoop.coroutine.serializedValue
 import java.sql.Connection
@@ -35,38 +36,43 @@ class ReturnValueRepository(private val fluentJdbc: FluentJdbc) {
         variableName: VariableName,
         value: PGobject,
     ) {
-        val lineageArray = connection.createArrayOf("uuid", cooperationLineage.toTypedArray())
+        asScoopInfrastructure {
+            val lineageArray = connection.createArrayOf("uuid", cooperationLineage.toTypedArray())
 
-        try {
-            fluentJdbc
-                .queryOn(connection)
-                .update(
-                    """
-                    INSERT INTO return_value (cooperation_lineage, handler_name, variable_name, value)
-                    VALUES (:lineage, :handlerName, :variableName, :value)
-                    """
-                        .trimIndent()
-                )
-                .namedParam("lineage", lineageArray)
-                .namedParam("handlerName", handlerName)
-                .namedParam("variableName", variableName.serializedValue)
-                .namedParam("value", value)
-                .run()
-        } catch (e: SQLException) {
-            // Check if this is a unique constraint violation
-            if (
-                e.message?.contains("unique_return_value_per_lineage_handler_variable") == true ||
-                    e.cause
-                        ?.message
-                        ?.contains("unique_return_value_per_lineage_handler_variable") == true
-            ) {
-                throw ReturnValueAlreadyExistsException(
-                    cooperationLineage,
-                    handlerName,
-                    variableName,
-                )
+            try {
+                fluentJdbc
+                    .queryOn(connection)
+                    .update(
+                        """
+                        INSERT INTO return_value (cooperation_lineage, handler_name, variable_name, value)
+                        VALUES (:lineage, :handlerName, :variableName, :value)
+                        """
+                            .trimIndent()
+                    )
+                    .namedParam("lineage", lineageArray)
+                    .namedParam("handlerName", handlerName)
+                    .namedParam("variableName", variableName.serializedValue)
+                    .namedParam("value", value)
+                    .run()
+            } catch (e: SQLException) {
+                // Check if this is a unique constraint violation. This is a logical outcome (not an
+                // infrastructure fault), so it is rethrown as-is and passes through
+                // asScoopInfrastructure untouched.
+                if (
+                    e.message?.contains("unique_return_value_per_lineage_handler_variable") ==
+                        true ||
+                        e.cause
+                            ?.message
+                            ?.contains("unique_return_value_per_lineage_handler_variable") == true
+                ) {
+                    throw ReturnValueAlreadyExistsException(
+                        cooperationLineage,
+                        handlerName,
+                        variableName,
+                    )
+                }
+                throw e
             }
-            throw e
         }
     }
 
@@ -87,11 +93,11 @@ class ReturnValueRepository(private val fluentJdbc: FluentJdbc) {
         parentLineage: List<UUID>,
         variableName: VariableName,
         handlerRegistry: (String) -> Handler<*>,
-    ): Map<Handler<*>, PGobject> {
+    ): Map<Handler<*>, PGobject> = asScoopInfrastructure {
         val lineageArray = connection.createArrayOf("uuid", parentLineage.toTypedArray())
         val childCardinality = parentLineage.size + 1
 
-        return fluentJdbc
+        fluentJdbc
             .queryOn(connection)
             .select(
                 """
@@ -127,11 +133,11 @@ class ReturnValueRepository(private val fluentJdbc: FluentJdbc) {
         parentLineage: List<UUID>,
         variableName: VariableName,
         handler: Handler<*>,
-    ): PGobject? {
+    ): PGobject? = asScoopInfrastructure {
         val lineageArray = connection.createArrayOf("uuid", parentLineage.toTypedArray())
         val childCardinality = parentLineage.size + 1
 
-        return fluentJdbc
+        fluentJdbc
             .queryOn(connection)
             .select(
                 """
