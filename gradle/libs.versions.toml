@@ -1,15 +1,15 @@
 [versions]
-kotlin = "2.1.20"              # checked: 2026-03-10
-quarkus = "3.32.3"             # checked: 2026-03-30
-ktfmt = "0.25.0"               # checked: 2026-03-10
-detekt = "1.23.8"              # checked: 2026-03-10
-fluentjdbc = "1.8.6"           # checked: 2026-03-10
-quarkus-fluentjdbc = "1.0.0"   # checked: 2026-03-10
-maven-publish = "0.32.0"        # checked: 2026-03-10 (0.33+ requires Kotlin 2.2+)
-slf4j = "2.0.17"               # checked: 2026-03-10
-jackson = "2.18.3"             # checked: 2026-03-10
-postgresql = "42.7.10"          # checked: 2026-03-10
-junit = "5.11.4"                # checked: 2026-04-02
+kotlin = "2.3.21"               # checked: 2026-06-20 (Quarkus 3.36.3 BOM's Kotlin)
+quarkus = "3.36.3"              # checked: 2026-06-20
+ktfmt = "0.26.0"               # checked: 2026-06-20
+detekt = "2.0.0-alpha.3"       # checked: 2026-06-20 — first 2.0 alpha that reads Kotlin 2.3 (K2); alpha.4/.5 pull Kotlin 2.4
+fluentjdbc = "1.8.6"           # checked: 2026-06-20 — latest
+quarkus-fluentjdbc = "1.0.0"   # checked: 2026-06-20 — latest
+maven-publish = "0.36.0"        # checked: 2026-06-20 (Kotlin 2.3 unblocks 0.33+)
+slf4j = "2.0.18"               # checked: 2026-06-20
+jackson = "2.22.0"             # checked: 2026-06-20
+postgresql = "42.7.11"          # checked: 2026-06-20
+junit = "5.14.4"                # checked: 2026-06-20 — latest 5.x
 
 [libraries]
 # Core (framework-agnostic) dependencies
@@ -18,6 +18,7 @@ fluentjdbc = { module = "org.codejargon:fluentjdbc", version.ref = "fluentjdbc" 
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 
 # Quarkus dependencies
@@ -39,5 +40,5 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "kotlin" }
 quarkus = { id = "io.quarkus", version.ref = "quarkus" }
 ktfmt = { id = "com.ncorti.ktfmt.gradle", version.ref = "ktfmt" }
-detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "maven-publish" }

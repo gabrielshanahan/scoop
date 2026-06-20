@@ -168,22 +168,21 @@ class PostgresMessageQueue(
             }
         }
 
-        val workerHandles =
-            workerSagas.map { workerSaga ->
-                val periodicTick =
-                    eventLoop.tickPeriodically(
-                        topic,
-                        workerSaga,
-                        tickInterval,
-                        isShuttingDown = { shuttingDown.get() || ticksPaused.get() },
-                    )
-                // Route the NOTIFY callback through the worker's own single-thread executor so
-                // that push-driven ticks never run concurrently with the scheduled tick — each
-                // worker stays strictly serial, and parallelism comes only from `instances`.
-                val notifierHandle = topicNotifier.onMessage(topic) { periodicTick.trigger() }
-                topicsToCoroutines.add(topic to workerSaga.identifier)
-                WorkerHandle(workerSaga.identifier, notifierHandle, periodicTick)
-            }
+        val workerHandles = workerSagas.map { workerSaga ->
+            val periodicTick =
+                eventLoop.tickPeriodically(
+                    topic,
+                    workerSaga,
+                    tickInterval,
+                    isShuttingDown = { shuttingDown.get() || ticksPaused.get() },
+                )
+            // Route the NOTIFY callback through the worker's own single-thread executor so
+            // that push-driven ticks never run concurrently with the scheduled tick — each
+            // worker stays strictly serial, and parallelism comes only from `instances`.
+            val notifierHandle = topicNotifier.onMessage(topic) { periodicTick.trigger() }
+            topicsToCoroutines.add(topic to workerSaga.identifier)
+            WorkerHandle(workerSaga.identifier, notifierHandle, periodicTick)
+        }
 
         return Subscription {
             workerHandles.forEach { handle ->

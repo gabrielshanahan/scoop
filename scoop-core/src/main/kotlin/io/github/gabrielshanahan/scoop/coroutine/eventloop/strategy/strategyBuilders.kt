@@ -167,10 +167,9 @@ fun allEmissionsHaveCorrespondingContinuationStarts(
 ): String {
     // Convert the handler topology map into a flat list of (topic, handler) pairs
     // This transforms Map<String, List<String>> into List<Pair<String, String>>
-    val topicToHandlerPairs =
-        topicsToHandlerNames.flatMap { (topic, handlers) ->
-            handlers.map { handler -> topic to handler }
-        }
+    val topicToHandlerPairs = topicsToHandlerNames.flatMap { (topic, handlers) ->
+        handlers.map { handler -> topic to handler }
+    }
 
     // If no handlers are registered, all emissions are trivially handled
     // This avoids generating invalid SQL with empty VALUES clause
