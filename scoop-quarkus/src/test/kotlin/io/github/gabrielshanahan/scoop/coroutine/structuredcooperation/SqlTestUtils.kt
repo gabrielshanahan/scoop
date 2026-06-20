@@ -71,13 +71,12 @@ class SqlTestUtils(private val fluentJdbc: FluentJdbc, private val jsonbHelper: 
         eventType: String,
         throwable: Throwable?,
     ): UUID {
-        val exception =
-            throwable?.let {
-                CooperationFailure.fromThrowable(
-                    it,
-                    distributedCoroutineIdentifier.run { "$name[$instance]" },
-                )
-            }
+        val exception = throwable?.let {
+            CooperationFailure.fromThrowable(
+                it,
+                distributedCoroutineIdentifier.run { "$name[$instance]" },
+            )
+        }
 
         return fluentJdbc
             .query()
@@ -109,13 +108,12 @@ class SqlTestUtils(private val fluentJdbc: FluentJdbc, private val jsonbHelper: 
         eventType: String,
         throwable: Throwable?,
     ): UUID {
-        val exception =
-            throwable?.let {
-                CooperationFailure.fromThrowable(
-                    it,
-                    continuationIdentifier.distributedCoroutineIdentifier.run { "$name[$instance]" },
-                )
-            }
+        val exception = throwable?.let {
+            CooperationFailure.fromThrowable(
+                it,
+                continuationIdentifier.distributedCoroutineIdentifier.run { "$name[$instance]" },
+            )
+        }
 
         return fluentJdbc
             .query()

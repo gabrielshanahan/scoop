@@ -61,10 +61,9 @@ class CancellationTest : StructuredCooperationTest() {
 
         try {
             val rootPayload = jsonbHelper.toPGobject(mapOf("initial" to "true"))
-            val cooperationRoot =
-                fluentJdbc.transactional { connection ->
-                    messageQueue.launch(connection, rootTopic, rootPayload)
-                }
+            val cooperationRoot = fluentJdbc.transactional { connection ->
+                messageQueue.launch(connection, rootTopic, rootPayload)
+            }
 
             childIsExecuting.await()
             fluentJdbc.transactional { connection ->
@@ -215,10 +214,9 @@ class CancellationTest : StructuredCooperationTest() {
 
         try {
             val rootPayload = jsonbHelper.toPGobject(mapOf("initial" to "true"))
-            val cooperationRoot =
-                fluentJdbc.transactional { connection ->
-                    messageQueue.launch(connection, rootTopic, rootPayload)
-                }
+            val cooperationRoot = fluentJdbc.transactional { connection ->
+                messageQueue.launch(connection, rootTopic, rootPayload)
+            }
 
             Assertions.assertTrue(
                 latch.await(10, TimeUnit.SECONDS),

@@ -1082,23 +1082,18 @@ class PendingCoroutineRunSqlTest : StructuredCooperationTest() {
                 seen()
                 verify(seenForProcessing) { result -> result.assertSeenIsFor(message.id) }
 
-                val result =
-                    fluentJdbc.transactional { connection ->
-                        fluentJdbc
-                            .queryOn(connection)
-                            .select(seenForProcessing.build())
-                            .namedParam("coroutine_name", distributedCoroutineIdentifier.name)
-                            .listResult(Mappers.map())
-                            .also {
-                                it.assertSeenIsFor(message.id)
-                                thread {
-                                        verify(seenForProcessing) { result ->
-                                            result.assertNoSeen()
-                                        }
-                                    }
-                                    .join()
-                            }
-                    }
+                val result = fluentJdbc.transactional { connection ->
+                    fluentJdbc
+                        .queryOn(connection)
+                        .select(seenForProcessing.build())
+                        .namedParam("coroutine_name", distributedCoroutineIdentifier.name)
+                        .listResult(Mappers.map())
+                        .also {
+                            it.assertSeenIsFor(message.id)
+                            thread { verify(seenForProcessing) { result -> result.assertNoSeen() } }
+                                .join()
+                        }
+                }
 
                 result.assertSeenIsFor(message.id)
                 verify(seenForProcessing) { result -> result.assertSeenIsFor(message.id) }

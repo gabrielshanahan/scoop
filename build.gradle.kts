@@ -10,7 +10,7 @@ plugins {
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "com.ncorti.ktfmt.gradle")
-    apply(plugin = "io.gitlab.arturbosch.detekt")
+    apply(plugin = "dev.detekt")
     apply(plugin = "com.vanniktech.maven.publish")
 
     group = "io.github.gabrielshanahan"
@@ -46,24 +46,27 @@ subprojects {
         kotlinLangStyle()
     }
 
-    configure<io.gitlab.arturbosch.detekt.extensions.DetektExtension> {
-        buildUponDefaultConfig = true
+    configure<dev.detekt.gradle.extensions.DetektExtension> {
+        buildUponDefaultConfig.set(true)
         config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
-        baseline = file("$rootDir/config/detekt/baseline.xml")
     }
 
-    tasks.withType<io.gitlab.arturbosch.detekt.DetektCreateBaselineTask>().configureEach {
-        jvmTarget = "21"
+    // One baseline per module: detekt 2.0 no longer auto-wires the extension baseline onto the
+    // Detekt tasks, and a single shared baseline file would be clobbered by whichever module runs
+    // detektBaseline last. Set it explicitly on both the analysis and baseline-creation tasks.
+    val moduleBaseline = file("$rootDir/config/detekt/baseline-$name.xml")
+
+    tasks.withType<dev.detekt.gradle.DetektCreateBaselineTask>().configureEach {
+        jvmTarget.set("21")
+        baseline.set(moduleBaseline)
     }
 
-    tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
-        jvmTarget = "21"
+    tasks.withType<dev.detekt.gradle.Detekt>().configureEach {
+        jvmTarget.set("21")
+        if (moduleBaseline.exists()) baseline.set(moduleBaseline)
         reports {
             html.required.set(true)
-            xml.required.set(false)
-            txt.required.set(true)
             sarif.required.set(false)
-            md.required.set(false)
         }
     }
 
@@ -72,7 +75,7 @@ subprojects {
     tasks.register("format") { dependsOn("ktfmtFormat") }
 
     configure<com.vanniktech.maven.publish.MavenPublishBaseExtension> {
-        publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
+        publishToMavenCentral()
         if (project.findProperty("signingInMemoryKey") != null ||
             project.findProperty("signing.keyId") != null) {
             signAllPublications()

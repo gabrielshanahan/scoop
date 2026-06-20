@@ -282,10 +282,9 @@ class EventLoop(
         runApproximatelyEvery: Duration,
         isShuttingDown: () -> Boolean = { false },
     ): PeriodicTick {
-        val executor =
-            Executors.newSingleThreadScheduledExecutor { r ->
-                Thread(r, "scoop-tick-${distributedCoroutine.identifier}").apply { isDaemon = true }
-            }
+        val executor = Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "scoop-tick-${distributedCoroutine.identifier}").apply { isDaemon = true }
+        }
         val intervalMs = runApproximatelyEvery.toMillis()
         val jitterMs = (intervalMs * 0.02).toLong()
 
@@ -903,14 +902,13 @@ class EventLoop(
         exception: Throwable? = null,
         nextStep: Int? = null,
     ) {
-        val cooperationFailure =
-            exception?.let {
-                CooperationFailure.Companion.fromThrowable(
-                    it,
-                    scope.continuation.continuationIdentifier.distributedCoroutineIdentifier
-                        .renderAsString(),
-                )
-            }
+        val cooperationFailure = exception?.let {
+            CooperationFailure.Companion.fromThrowable(
+                it,
+                scope.continuation.continuationIdentifier.distributedCoroutineIdentifier
+                    .renderAsString(),
+            )
+        }
 
         val childFailureHandlerIteration =
             when (
