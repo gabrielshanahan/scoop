@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+## v0.4.0 — 2026-06-25
+
 ### Changed
 
 - **Reconciliation now runs on demand instead of on every tick.** The first half of each event-loop tick — `startContinuationsForCoroutine`, the `EMITTED→SEEN` / `ROLLBACK_EMITTED→ROLLING_BACK` anti-joins over `message_event` — used to run on *every* tick of *every* subscribed worker, whether or not anything had been emitted. With N idle topics at a fast tick interval this was the dominant idle cost (on one ~48-topic deployment at a 500 ms tick it was ~58% of a fully-utilised core doing nothing). Reconciliation is now gated on a per-worker signal set by the same `LISTEN/NOTIFY` that already wakes the loop: a worker reconciles only after a notification for its topic (and drains across a few ticks so contending siblings all start — see below), plus a rare safety-net sweep. Idle topics now do ~zero reconciliation scans. **The resume half of the tick is unchanged — it still runs every tick**, so time-based resumption (e.g. deadlines/sleep) and recovery from a missed notification are unaffected. No application code changes are required to benefit. **Adopters running multiple *distinct* sagas on the *same* topic in one JVM** previously relied on every-tick reconciliation to start the overwritten ones (a Vert.x `PgChannel` has a single handler slot); this is now handled correctly by the notifier itself (see *Fixed*), but it means you should be on this version before reducing your tick frequency.
