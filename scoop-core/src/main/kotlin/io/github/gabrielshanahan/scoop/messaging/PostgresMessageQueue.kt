@@ -1,6 +1,7 @@
 package io.github.gabrielshanahan.scoop.messaging
 
 import io.github.gabrielshanahan.scoop.JsonbHelper
+import io.github.gabrielshanahan.scoop.coroutine.DEFAULT_RECONCILE_SAFETY_NET
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutine
 import io.github.gabrielshanahan.scoop.coroutine.DistributedCoroutineIdentifier
 import io.github.gabrielshanahan.scoop.coroutine.EventLoop
@@ -43,6 +44,7 @@ class PostgresMessageQueue(
     private val messageRepository: MessageRepository,
     private val eventLoop: EventLoop,
     private val tickInterval: Duration = DEFAULT_TICK_INTERVAL,
+    private val reconcileSafetyNet: Duration = DEFAULT_RECONCILE_SAFETY_NET,
 ) : HandlerRegistry, AutoCloseable {
 
     private val topicsToCoroutines =
@@ -174,6 +176,7 @@ class PostgresMessageQueue(
                     topic,
                     workerSaga,
                     tickInterval,
+                    reconcileSafetyNet,
                     isShuttingDown = { shuttingDown.get() || ticksPaused.get() },
                 )
             // Route the NOTIFY callback through the worker's own single-thread executor so

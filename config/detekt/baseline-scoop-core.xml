@@ -2,7 +2,7 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>LongMethod:MessageEventRepository.kt:MessageEventRepository$fun startContinuationsForCoroutine</ID>
+    <ID>LongMethod:MessageEventRepository.kt:MessageEventRepository$fun startContinuationsForCoroutine: Int</ID>
     <ID>LongMethod:PendingCoroutineRunSql.kt:fun candidateSeensWaitingToBeProcessed</ID>
     <ID>LongMethod:PendingCoroutineRunSql.kt:fun finalSelect</ID>
     <ID>LongMethod:RollbackPathContinuation.kt:internal fun DistributedCoroutine.buildRollbackPathContinuation: RollbackPathContinuation</ID>

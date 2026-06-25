@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+### Changed
+
+- **Reconciliation now runs on demand instead of on every tick.** The first half of each event-loop tick — `startContinuationsForCoroutine`, the `EMITTED→SEEN` / `ROLLBACK_EMITTED→ROLLING_BACK` anti-joins over `message_event` — used to run on *every* tick of *every* subscribed worker, whether or not anything had been emitted. With N idle topics at a fast tick interval this was the dominant idle cost (on one ~48-topic deployment at a 500 ms tick it was ~58% of a fully-utilised core doing nothing). Reconciliation is now gated on a per-worker signal set by the same `LISTEN/NOTIFY` that already wakes the loop: a worker reconciles only after a notification for its topic (and drains across a few ticks so contending siblings all start — see below), plus a rare safety-net sweep. Idle topics now do ~zero reconciliation scans. **The resume half of the tick is unchanged — it still runs every tick**, so time-based resumption (e.g. deadlines/sleep) and recovery from a missed notification are unaffected. No application code changes are required to benefit. **Adopters running multiple *distinct* sagas on the *same* topic in one JVM** previously relied on every-tick reconciliation to start the overwritten ones (a Vert.x `PgChannel` has a single handler slot); this is now handled correctly by the notifier itself (see *Fixed*), but it means you should be on this version before reducing your tick frequency.
+
+### Added
+
+- **`scoop.reconcile.safety-net-interval`** (default `30s`): the upper bound on how stale a worker's reconciliation may get when no `NOTIFY` arrives. This is the worst-case recovery latency for any *missed* notification — a dropped `LISTEN` connection, a server crash that wipes the async-notify queue, or a row left under `FOR UPDATE SKIP LOCKED` contention longer than the on-demand drain tail. It preserves Scoop's "correct without `LISTEN/NOTIFY` at all" guarantee while making the common idle path free. Lower it to tighten worst-case recovery at the cost of more idle reconciliation scans; the default is well above any tick interval. Correctness never depends on notification delivery — only latency does.
+- **Migration `V5__notify_on_rollback_emitted.sql`** (applied automatically by the bundled Flyway migrations): a trigger that fires `pg_notify(topic, message_id)` when a `ROLLBACK_EMITTED` `message_event` is inserted. Ordinary emissions already notify via the `message` insert trigger, but a `ROLLBACK_EMITTED` reuses an existing message id and inserts no `message` row, so it fired no notification. Without it, gated reconciliation would only pick up rollbacks on the safety-net sweep; with it, rollback start stays prompt and event-driven, symmetric with ordinary emissions. **Adopters must apply this migration** (it ships in `scoop-quarkus`'s `db/migration` and runs on startup if you use the provided Flyway setup; otherwise apply the equivalent trigger to your schema).
+
+### Fixed
+
+- **A single `NOTIFY` now starts *all* handlers subscribed to a topic, not just the last one registered in a JVM.** `PgSubscriberTopicNotifier` registered one Vert.x channel handler per `onMessage` call, but a Vert.x `PgChannel` has a single handler slot and `channel(name)` is shared per name, so the last subscriber to a topic silently overwrote earlier ones' notification handlers. This was masked while reconciliation ran every tick; with on-demand reconciliation an overwritten handler would have started only on the safety-net sweep. The notifier now owns the fan-out — one Vert.x handler per topic dispatching to every registered callback — so every worker/saga on a topic is woken by each notification.
+
 ## v0.3.2 — 2026-06-20
 
 ## v0.3.1 — 2026-06-19

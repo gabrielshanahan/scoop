@@ -48,6 +48,19 @@ private const val SHUTDOWN_TIMEOUT_SECONDS = 10L
 private const val SHUTDOWN_INTERRUPT_TIMEOUT_SECONDS = 2L
 
 /**
+ * Default upper bound on how stale a worker's reconciliation may get when no NOTIFY arrives. Acts
+ * as the safety-net sweep interval in [ReconcileGate]: it is the worst-case recovery latency for
+ * any missed notification (dropped LISTEN, server crash wiping the async-notify queue, a `SKIP
+ * LOCKED` row skipped under contention, the subscribe/LISTEN startup window). Well above any tick
+ * interval, so idle topics reconcile rarely; lower it to tighten worst-case recovery at the cost of
+ * more idle reconciles. Overridable via `scoop.reconcile.safety-net-interval`.
+ */
+private const val DEFAULT_RECONCILE_SAFETY_NET_SECONDS = 30L
+
+val DEFAULT_RECONCILE_SAFETY_NET: Duration =
+    Duration.ofSeconds(DEFAULT_RECONCILE_SAFETY_NET_SECONDS)
+
+/**
  * The core execution engine that drives structured cooperation by resuming suspended sagas.
  *
  * The [EventLoop] is the heart of Scoop's execution model. It implements the "event loop" pattern
@@ -170,23 +183,43 @@ class EventLoop(
     fun tick(
         topic: String,
         distributedCoroutine: DistributedCoroutine,
+        reconcileGate: ReconcileGate = ReconcileGate.ALWAYS,
         isShuttingDown: () -> Boolean = { false },
     ) {
         try {
-            fluentJdbc.transactional { connection ->
+            // Reconciliation (EMITTED→SEEN / ROLLBACK_EMITTED→ROLLING_BACK) only has work to do on
+            // a
+            // tick that follows a NOTIFY for this topic; on an idle safety-net tick the anti-joins
+            // are guaranteed empty. The gate skips them unless a notification has been coalesced
+            // since the last reconcile (or the safety-net interval elapsed). The resume drain below
+            // always runs — time-based resume, child-completion and missed-NOTIFY recovery need it
+            // every tick. See [ReconcileGate].
+            if (reconcileGate.shouldReconcile()) {
                 try {
-                    messageEventRepository.startContinuationsForCoroutine(
-                        connection,
-                        distributedCoroutine.identifier.name,
-                        distributedCoroutine.identifier.instance,
-                        topic,
-                        distributedCoroutine.eventLoopStrategy,
-                    )
+                    val insertedRows = fluentJdbc.transactional { connection ->
+                        try {
+                            messageEventRepository.startContinuationsForCoroutine(
+                                connection,
+                                distributedCoroutine.identifier.name,
+                                distributedCoroutine.identifier.instance,
+                                topic,
+                                distributedCoroutine.eventLoopStrategy,
+                            )
+                        } catch (e: Exception) {
+                            logger.error(
+                                "[${connection.backendPID()}] Error when starting continuations for coroutine ${distributedCoroutine.identifier}",
+                                e,
+                            )
+                            throw e
+                        }
+                    }
+                    reconcileGate.reconcileSucceeded(insertedRows)
                 } catch (e: Exception) {
-                    logger.error(
-                        "[${connection.backendPID()}] Error when starting continuations for coroutine ${distributedCoroutine.identifier}",
-                        e,
-                    )
+                    // Re-arm so a failed/rolled-back reconcile is retried on the next tick instead
+                    // of
+                    // waiting for the safety-net sweep, then propagate (preserving the prior
+                    // behaviour of aborting this tick before the drain).
+                    reconcileGate.reconcileFailed()
                     throw e
                 }
             }
@@ -280,6 +313,7 @@ class EventLoop(
         topic: String,
         distributedCoroutine: DistributedCoroutine,
         runApproximatelyEvery: Duration,
+        reconcileSafetyNet: Duration = DEFAULT_RECONCILE_SAFETY_NET,
         isShuttingDown: () -> Boolean = { false },
     ): PeriodicTick {
         val executor = Executors.newSingleThreadScheduledExecutor { r ->
@@ -287,6 +321,11 @@ class EventLoop(
         }
         val intervalMs = runApproximatelyEvery.toMillis()
         val jitterMs = (intervalMs * 0.02).toLong()
+
+        // Per-worker reconciliation gate. Set dirty by [PeriodicTick.trigger] on every NOTIFY (even
+        // a
+        // coalesced one), consumed by [tick]. See [ReconcileGate].
+        val reconcileGate = ReconcileGate.create(reconcileSafetyNet)
 
         // One permit represents "there is at most one tick accounted for — running or queued."
         // Both the scheduled path and [trigger] try-acquire *before* enqueuing and release once the
@@ -301,7 +340,7 @@ class EventLoop(
                 logger.debug(
                     "Starting tick for topic $topic and coroutine ${distributedCoroutine.identifier}"
                 )
-                tick(topic, distributedCoroutine, isShuttingDown)
+                tick(topic, distributedCoroutine, reconcileGate, isShuttingDown)
             } catch (e: Exception) {
                 logger.error("Event loop for ${distributedCoroutine.identifier} failed", e)
             } finally {
@@ -330,6 +369,14 @@ class EventLoop(
 
         return object : PeriodicTick {
             override fun trigger() {
+                // Mark dirty *unconditionally, before* the acquire below: a trigger that is
+                // coalesced
+                // (because a tick is already pending/running) must still record that there may be
+                // new
+                // work, otherwise the notification it represents would be lost — the in-flight tick
+                // may already have consumed its dirty bit. Whichever tick runs next then
+                // reconciles.
+                reconcileGate.markDirty()
                 // Acquire first, enqueue second: if another tick is already pending or running,
                 // we drop this trigger entirely rather than piling up no-op runnables on the
                 // executor's queue. The permit is released by `runTick` or the catch branch below.
