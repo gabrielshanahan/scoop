@@ -518,7 +518,7 @@ class MessageEventRepository(
         coroutineIdentifier: String,
         topic: String,
         eventLoopStrategy: EventLoopStrategy,
-    ) {
+    ): Int {
         logger.debug("Starting continuations: coroutine='{}', topic='{}'", coroutineName, topic)
         @Language("PostgreSQL")
         val sql =
@@ -654,18 +654,24 @@ class MessageEventRepository(
                     ON CONFLICT (coroutine_name, message_id, type) WHERE type = 'ROLLING_BACK' DO NOTHING
                     RETURNING id
                 )
-                -- Just here to execute the CTEs
-                SELECT 1;
+                -- Report how many rows were actually inserted. The caller's reconciliation gate
+                -- uses this to keep reconciling across ticks until a pass drains (inserts nothing):
+                -- a single NOTIFY can require several passes when sibling handlers contend on the
+                -- same parent SEEN row via FOR UPDATE SKIP LOCKED (the loser inserts nothing on the
+                -- contended pass and must retry once the lock is released).
+                SELECT
+                    (SELECT count(*) FROM seen_insert)
+                    + (SELECT count(*) FROM rolling_back_insert) AS inserted;
             """
                 .trimIndent()
 
-        fluentJdbc
+        return fluentJdbc
             .queryOn(connection)
             .select(sql)
             .namedParam("coroutine_name", coroutineName)
             .namedParam("coroutine_identifier", coroutineIdentifier)
             .namedParam("topic", topic)
-            .singleResult {}
+            .singleResult { it.getInt("inserted") }
     }
 
     /**

@@ -36,6 +36,14 @@ class ScoopProducer(
     private val dataSource: DataSource,
     @ConfigProperty(name = "scoop.tick-interval-ms", defaultValue = "50")
     private val tickIntervalMs: Long,
+    // Upper bound on reconciliation staleness when no NOTIFY arrives — the safety-net sweep
+    // interval
+    // (see ReconcileGate). Reconciliation normally runs on demand (driven by LISTEN/NOTIFY); this
+    // is
+    // the worst-case recovery latency for a missed notification. Default 30s; lower it to tighten
+    // recovery at the cost of more idle reconciles.
+    @ConfigProperty(name = "scoop.reconcile.safety-net-interval", defaultValue = "30s")
+    private val reconcileSafetyNet: Duration,
     // Exponential backoff between retries after a ScoopInfrastructureException (Scoop's own
     // bookkeeping failed, e.g. a dead connection — never a saga-logic failure, so never a
     // rollback).
@@ -127,6 +135,7 @@ class ScoopProducer(
             messageRepository,
             eventLoop,
             Duration.ofMillis(tickIntervalMs),
+            reconcileSafetyNet,
         )
 
     /**
