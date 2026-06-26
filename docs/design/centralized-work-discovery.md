@@ -114,22 +114,41 @@ The structured-cooperation invariants live in the **execution** layer. Discovery
 
 ### What this buys (and what it does not)
 
-The win is **not** less data scanned — the union of all coroutines' candidates is the same rows.
-The win is removing **per-query fixed cost × N** (planning one ~20 KB / ~450-param statement N times
-becomes planning `~K` statements) and the **per-coroutine busy-spin × N**. Cost moves from
-`O(N × cadence × per-query)` toward `O(K × cadence × per-query)`, `K = #gate-fingerprints` (~2–3),
-independent of coroutine count.
+Three distinct wins, in rough order of impact:
 
-Bonus — **plan stability.** The central query needn't carry `coroutine_name = $1`, so there is one
-plan per group to index and tune. Downstream, the per-coroutine parameterized query also suffered a
-generic-plan/stale-stats flip (a per-call latency swing that reset on each autovacuum/analyze); a
-single, less-parameterized statement is far less exposed.
+1. **The heavy projection moves from "every idle poll" to "only on a hit."** Today the resume drain
+   calls `fetchPendingCoroutineRun` (`MessageEventRepository.kt:751`), whose **first pass computes
+   the full `finalSelect`** — `lastTwoEvents` + the correlated `JSON_AGG` subqueries for child
+   exceptions / executed-step-instances (`PendingCoroutineRunSql.kt:482–545`) — and then extracts
+   only `id`, discarding the rest. So **every idle tick of every coroutine** computes that heavy
+   projection and gets nothing. Discovery stops at `candidateSeensWaitingToBeProcessed` (predicate
+   only, no `finalSelect`); the expensive projection runs **only** for runs that are actually about
+   to execute. This is the largest single saving and is independent of the N→K argument.
+2. **Per-query fixed cost × N → × K.** Parsing/planning one large statement N times becomes K times
+   (`K = #gate-fingerprints`, ~2–3). The win is **not** less data scanned — the union of all
+   coroutines' candidates is the same rows — it is removing the redundant parse/plan and the
+   per-coroutine `whileISaySo` busy-spin × N.
+3. **Plan stability (bonus).** The central discovery query needn't carry `coroutine_name = $1`, so
+   there is one plan per group to tune. Downstream (nexus), the per-coroutine parameterized query
+   reportedly suffered a generic-plan/stale-stats flip that reset on each autovacuum/analyze; a
+   less-parameterized statement is less exposed. (The "~20 KB / ~450 bound params" figure is a
+   downstream observation — note that the handler topology is interpolated as **text literals**, not
+   bound params, so most of the 20 KB is `VALUES (…)` size, not param count; confirm the real param
+   count in scoop before leaning on this.)
 
 Explicitly **not** solved (don't oversell):
-- **Scan growth over live history.** One query over a huge `message_event` is still slow — just
-  slow once per group instead of N times. Bounding table growth (pruning/archive/finite scan
-  window) is a separate, complementary, largely app-side lever.
-- **Polling itself.** `N→K` still leaves a periodic scan. Killing the scan is §7.
+- **Per-scan cost over live history.** One discovery query over a huge `message_event` is still a
+  scan — just one per group instead of N. And it is **not guaranteed cheaper per execution than a
+  small per-coroutine query**: with the `coroutine_name` anchor gone, the candidate set is the
+  global non-terminal-SEEN set, and the plan may change *qualitatively* — possibly **better** (one
+  shared hash anti-join for the terminal-state / child-completion `NOT EXISTS` checks instead of N),
+  possibly **worse** (a nested-loop blow-up if the planner correlates per candidate). This **must
+  be checked with `EXPLAIN ANALYZE` at representative candidate volume**, and it raises the
+  importance of indexes supporting `cooperation_lineage` equality (the terminal-state subqueries,
+  `PendingCoroutineRunSql.kt:97–120`) and `<@` containment (child detection) — see §9. Bounding
+  table growth (pruning/archive/finite window) remains a separate, complementary, app-side lever.
+- **Polling itself.** `N→K` still leaves a periodic scan. Killing the scan is §7 — and note §9's
+  observation that an event-driven conversion gets there with *fewer* invariant changes.
 
 ---
 
@@ -166,16 +185,37 @@ downstream by fingerprinting the registry, not by guessing.
 3. **Drop** the `FOR UPDATE SKIP LOCKED LIMIT 1` tail (`seenForProcessing`, `:407`) from the
    *discovery* query. Discovery returns the *set* of ready `(coroutine_name, message_id,
    cooperation_lineage)`; it does not lock. Locking happens in execution (step 4).
-4. **Reuse `seenForProcessing(secondRunAfterLock = true)` unchanged for the claim.** That branch
-   (`:412`) already selects a single run by `:message_id` with no `FOR UPDATE` and is exactly what
-   the double-checked-lock second pass needs. The first-pass lock (`fetchPendingCoroutineRun`,
-   `MessageEventRepository.kt:746`) stays as-is, now invoked per discovered item rather than per
-   poll.
+4. **The claim path is *not* a free reuse of `fetchPendingCoroutineRun` — correct it.** Today
+   `fetchPendingCoroutineRun` (`MessageEventRepository.kt:751`) runs a first pass that is the **full
+   per-coroutine gate with `FOR UPDATE SKIP LOCKED LIMIT 1`** and locks *whatever* run is ready
+   first — it does **not** target a particular run. Invoking it per discovered item would (a)
+   re-run the whole expensive gate per item (defeating the point) and (b) possibly lock a
+   *different* ready run than the one discovered. Instead, the claim must be **anchored to the
+   discovered run**:
+   - **Pass 1 (lock):** `candidateSeens` filtered by **`seen.cooperation_lineage = :lineage`** (the
+     run is uniquely identified by its lineage; `message_id` alone is **not** unique — one message
+     can have a SEEN per handler/coroutine), keeping `FOR UPDATE SKIP LOCKED`. This locks exactly
+     the one discovered row — indexed, O(1), not a gate re-scan.
+   - **Pass 2 (re-validate + project):** the existing `secondRunAfterLock = true` branch
+     (`PendingCoroutineRunSql.kt:412`) anchored on the same run, which re-evaluates readiness after
+     the lock (the double-check) **and** runs the heavy `finalSelect` to build the execution
+     context.
+   So `candidateSeens` gains an optional `:lineage` anchor for the claim path. The claim path also
+   **keeps `coroutine_name`** (it is claiming a specific coroutine's run); only the *discovery*
+   query drops it. This is a small, bounded change — not "unchanged."
 
 Everything between `candidateSeens` and `candidateSeensWaitingToBeProcessed` — the child-emission /
 child-seen / terminated-child CTEs and the structured-cooperation `NOT EXISTS` over
 `terminated_child_seens` (`:341`) — is **unchanged**. It was never coroutine-specific; it keys on
 `cooperation_lineage`.
+
+**Livelock guard.** Discovery and the claim's pass-2 re-validation **must be built from the exact
+same `candidateSeensWaitingToBeProcessed` CTE** (same strategy fragments), so they can never
+*systematically* disagree. If discovery used a looser/reimplemented predicate, it could keep
+surfacing a run the claim always rejects → discover→reject→rediscover livelock. Sharing the predicate
+makes any disagreement purely transient (the run's state genuinely changed between the two reads),
+which is self-correcting. Concretely: derive the light discovery projection by truncating the *same*
+SQL builder chain at `candidateSeensWaitingToBeProcessed`, don't hand-write a parallel predicate.
 
 **Ordering / fairness in the query.** The current `seenForProcessing` orders by emission time
 (`:406`) and takes one row. The discoverer should instead return many rows with a fairness-aware
@@ -207,12 +247,29 @@ election and keyspace partitioning are explicitly *not* required (and would be r
 single discoverer node would be a SPOF for discovery). This keeps scoop a library, not a
 leader-elected service.
 
-**`instances` keeps its meaning — as a per-coroutine concurrency cap.** Today `instances = N` spins
-N single-thread workers for one saga (`PostgresMessageQueue.kt:156`), bounding that saga to N
-concurrent runs. In the central model there is one execution pool; preserve the knob by **capping
-in-flight executions per `coroutine_name` at its configured `instances`** (default 1) in the
-dispatcher (§5). Same guarantee ("one `DistributedCoroutineIdentifier` = one serial worker",
-`PostgresMessageQueueTest` / v0.2.9 notes), expressed as a dispatch cap instead of a thread count.
+**`instances` changes meaning — concurrency cap, not N pre-created identities (an invariant
+change, call it out).** Today `instances = N` spins N single-thread workers for one saga
+(`PostgresMessageQueue.kt:156`), **each carrying a distinct pre-allocated
+`DistributedCoroutineIdentifier.instance` UUID**. The bound on concurrency is preserved by capping
+in-flight executions per `coroutine_name` at its configured `instances` (default 1) in the
+dispatcher (§5). But the *identity* story shifts: a generic execution pool has no per-worker
+pre-allocated instance UUID, so the property "**exactly N distinct instance UUIDs participate**"
+(asserted by `PostgresMessageQueueTest`'s "fans work out across distinct instance UUIDs") does not
+hold for free.
+
+This is **correctness-safe**: `coroutine_identifier` (the instance UUID) is verified **write-only**
+— it appears only in `INSERT INTO message_event (… coroutine_identifier …)` and is **never** in a
+`WHERE`/`JOIN` or readiness predicate (the gate keys on `coroutine_name`; work partitioning is done
+entirely by `FOR UPDATE SKIP LOCKED` on the row). So the instance UUID is **attribution only**
+(logs, traces, the `coroutine_identifier` column). Two clean options, decide explicitly:
+- **(a) Pre-allocate N identities per coroutine** and round-robin executions across them — preserves
+  the "N distinct UUIDs" property and the existing test verbatim.
+- **(b) Stamp a per-execution (or per-pool-worker) identifier** and **restate** the test's
+  assertion to "N concurrent executions" rather than "N distinct pre-seeded UUIDs."
+
+Recommend (a) for the least behavioral surprise. Either way, the *guarantee that matters* — at most
+`instances` concurrent runs of a coroutine, and no two workers processing the same SEEN (SKIP
+LOCKED) — is preserved.
 
 ---
 
@@ -310,11 +367,26 @@ v1 poller as a dead end** — give it that "next-due" interface from the start.
    `Σ instances` (`PostgresMessageQueue.kt:233`) to `1 (discovery) + pool_size`. Decide
    `pool_size` (cap at `Σ instances` to preserve max concurrency, or smaller to bound DB load) and
    restate the `requiredConnectionCount` test/assertion accordingly.
-5. **Reconcile: centralize too, or leave it?** Reconcile is already NOTIFY-gated and idle-free, so
-   it is *not* the cost driver. But its anti-join *is* per-coroutine (`:coroutine_name` at
-   `MessageEventRepository.kt:532,585`) and embeds `ignoreOlderThan` as a literal, so it has more
-   genuine per-coroutine variance than the resume gate. Recommendation: leave reconcile as-is in
-   v1 (event-driven already); revisit only if profiling says otherwise.
+5. **Reconcile must be *re-homed*, not "left as-is" (the note's earlier framing was wrong).**
+   Reconcile (`startContinuationsForCoroutine`) is genuinely per-coroutine — `:coroutine_name` at
+   `MessageEventRepository.kt:532,585` and `ignoreOlderThan` interpolated as a literal — so keep its
+   *logic* per-coroutine (don't fold it into a fingerprint group; the per-coroutine `ignoreOlderThan`
+   literals would fragment grouping anyway). **But it currently lives *inside* the periodic
+   per-coroutine `tick` (`EventLoop.kt:197`) that this design removes.** So when the periodic tick
+   goes away, reconcile's *trigger* must be rehomed to two surviving sources, preserving exactly
+   today's semantics:
+   - **NOTIFY-driven:** a `pg_notify` for topic T runs reconcile for the coroutine(s) on T (this is
+     already how 0.4.0 makes it idle-free; the notifier callback now drives reconcile directly
+     instead of via a gated tick). The `ReconcileGate` "drain across `QUIET_TICKS`" behavior
+     (`ReconcileGate.kt`) and the 0.4.0 sibling-fanout fix must be carried over or shown unnecessary.
+   - **Safety-net sweep:** the 30 s `scoop.reconcile.safety-net-interval` fallback was *also*
+     implemented via the periodic tick (`ReconcileGate.shouldReconcile()` returning true when the
+     interval elapsed). Removing the tick removes that fallback, so a **standalone periodic
+     reconcile sweep** (every safety-net interval, all coroutines) must be added. It is cheap (30 s,
+     not 50 ms) but it is **not free and must not be forgotten** — without it, a missed NOTIFY is
+     never recovered.
+   Net: reconcile stays per-coroutine in logic; its periodic-tick host is replaced by
+   {NOTIFY callback + a coarse safety-net sweep}. Resume is what gets centralized.
 6. **Where the discoverer lives.** A new `WorkDiscoverer` in `scoop-core` owning the registry view
    (`HandlerRegistry.listenersByTopic`, `PostgresMessageQueue.kt:205`) + the dispatch pool; wired in
    `scoop-quarkus/ScoopProducer`. `PostgresMessageQueue.subscribe` stops creating a per-saga
@@ -324,7 +396,99 @@ v1 poller as a dead end** — give it that "next-due" interface from the start.
 
 ---
 
-## 9. Definition of done
+## 9. Critical review — invariant ledger, residual risks, and a lower-risk alternative
+
+This section is an adversarial pass over the design itself (verified against the code), so the
+implementer inherits the caveats, not just the happy path.
+
+### 9a. Invariant ledger (what is preserved vs. what genuinely changes)
+
+| Invariant | Status | Why |
+|---|---|---|
+| `global_result == ⋃_C per_coroutine_result(C)` | **Preserved** | Readiness of a run is a function of its `cooperation_lineage` + global event state + the (shared) registry, **not** of the bound `coroutine_name` — the only per-coroutine predicate is the `candidateSeens` anchor (`PendingCoroutineRunSql.kt:92`); every downstream CTE and strategy fragment keys on lineage or reads globally. Dropping the anchor enlarges the candidate set; it does not change any per-run verdict. |
+| Structured-cooperation rule (parent waits for all children to terminate) | **Preserved** | The child-emission/child-seen/terminated-child CTEs already read across coroutines and key on lineage; untouched. |
+| No double-processing of a SEEN | **Preserved** | `FOR UPDATE SKIP LOCKED` + double-checked re-validation stay in the claim path (now lineage-anchored). |
+| Multi-instance / multi-node scaling | **Preserved, no leader election** | All nodes discover (read-only, idempotent); all race the per-row claim; SKIP LOCKED resolves. Equivalent to today's per-coroutine race. |
+| At most `instances` concurrent runs per coroutine | **Preserved** | Re-expressed as a per-`coroutine_name` dispatch cap (§5). |
+| "Exactly N **distinct instance UUIDs** participate" | **Changes** (correctness-safe) | `coroutine_identifier` is write-only/attribution (verified: never in a predicate). Pre-allocate N identities (option a) to keep it, or restate the test (option b). §4. |
+| Per-coroutine FIFO-ish processing (emission order) | **Must be re-established** | Today `whileISaySo` + `ORDER BY emitted_at` (`PendingCoroutineRunSql.kt:406`) gives per-coroutine emission order. With `instances`-cap = 1 the dispatcher must process a coroutine's ready runs in emission order to preserve it (independent runs, so this is behavioral parity, not a hard correctness rule — but tests may observe it). |
+| Reconcile semantics (NOTIFY-driven + 30 s safety-net) | **Preserved only if re-homed** | The periodic tick that hosts both is removed; both triggers must be rebuilt (§8.5). Easy to forget the safety-net sweep → silent loss of missed-NOTIFY recovery. |
+| Infra-failure backoff (per-run) | **Preserved, already concurrent** | `backoffAttempts`/`backoffUntil` are `ConcurrentHashMap` on a single shared `EventLoop`, keyed by `messageId` — already touched by multiple coroutine threads today, so a shared pool adds no new hazard. |
+
+### 9b. Residual risks / things that must be checked (not assumed)
+
+1. **The global plan can be worse, not just "slower once."** With `coroutine_name` gone, the
+   candidate set is global and the terminal-state `NOT EXISTS` correlated subqueries
+   (`PendingCoroutineRunSql.kt:97–120`, equality on `cooperation_lineage`) and `<@` child checks run
+   over more rows. Postgres *may* rewrite these into single shared hash anti-joins (a win) or pick a
+   per-candidate nested loop (a blow-up). **`EXPLAIN ANALYZE` at representative candidate volume is a
+   gating step**, and it elevates the need for a **btree supporting `cooperation_lineage` equality**
+   (array `=` does **not** use the existing GIN, which only serves `@>`/`<@`/`&&`). Add the index if
+   the plan shows it; this is a pre-existing exposure that centralization concentrates into one
+   statement.
+2. **Re-discovery duplicate storms (backpressure + dedup).** Discovery re-runs on every NOTIFY and
+   every timer/interval; it re-surfaces every ready run **not yet drained**. Without dedup the
+   dispatch queue fills with duplicates and the pool wastes claims on already-in-flight runs (SKIP
+   LOCKED makes them harmless but not free). Mitigate with **(i)** an in-flight/queued set keyed by
+   `cooperation_lineage` that discovery skips, and **(ii)** capacity-aware discovery (fetch ≤ free
+   pool slots, e.g. a `LIMIT` tied to available capacity). This is new machinery the per-coroutine
+   `whileISaySo` never needed.
+3. **Multi-node claim contention.** Every node discovers the full ready set and tries to claim all of
+   it → `nodes × items` claim attempts for `items` rows. This equals today's `nodes × per-coroutine`
+   contention (no regression), but **randomize per-node dispatch order** so nodes don't all collide on
+   item 0 first.
+4. **Blast radius is larger than per-coroutine loops.** A wedged discoverer stalls *all* new
+   discovery (in-flight executions still finish). It must be the most robust component: strictly
+   non-destructive (read + propose only; the claim re-validates), watchdog-restarted, conservative
+   predicates. There is downstream prior art of a "reaper that deletes runs it shouldn't" — discovery
+   must never delete or write.
+5. **Observability regression.** The per-coroutine `scoop-tick-<identifier>` threads
+   (`EventLoop.kt:319`) give free per-coroutine CPU attribution in thread dumps; a shared discoverer +
+   generic pool loses that. Add per-coroutine counters (discovered / claimed / executed / claim-miss)
+   to replace what the thread names gave, especially since the brief cares about Grafana monitoring.
+6. **Test-fixture & lifecycle plumbing to re-home:** `pauseTicks`/`resumeTicks` (TRUNCATE-deadlock
+   avoidance, `PostgresMessageQueue.kt`) must pause the discoverer **and** the pool;
+   `requiredConnectionCount` changes from `Σ instances` to `1 (discovery) + pool_size` and its test
+   assertion must be restated; `Subscription.close()` / `PeriodicTick.close()` draining moves to the
+   pool.
+
+### 9c. The lower-risk alternative (read before committing to centralization)
+
+The biggest "hidden tradeoff" is one of *framing*: **centralizing the query is not the only way to
+kill the idle cost, and it is the way that changes the most invariants.** The actual cost driver is
+that **resume polls every tick regardless of whether anything changed**. Two reasons it must poll —
+both verified to lack a trigger today:
+
+- **child-completion** has no NOTIFY (a child `COMMITTED` writes no `message` row, so no trigger
+  fires — see §7), and
+- **time-readiness** (deadline/sleep/backoff) has no event at all.
+
+A purely **event-driven per-coroutine** conversion fixes both **without touching any invariant in
+the ledger above**: add a child-terminal-event NOTIFY (§7) so a parent wakes when its children
+finish, and give each coroutine loop a small **timer/min-heap** for its next time-trigger. Then each
+coroutine ticks **only when woken**, idle cost → 0, and `instances`, instance UUIDs, per-coroutine
+isolation, fairness-for-free, and the multi-instance story all stay **exactly as they are**.
+
+Against that baseline, query-centralization buys specifically:
+- lower cost when **many coroutines wake at once** (a burst, or the safety-net sweep): one K-query
+  beats N-queries; and
+- lower **per-wake** parse/plan cost if wakes are frequent.
+
+It does **not** buy idle-cost elimination that the event-driven conversion doesn't already give — and
+it costs the invariant changes in §9a + the risks in §9b.
+
+**Recommended sequencing** (reframes the brief's v1/v2):
+1. **First, make resume event-driven per-coroutine** (child-terminal NOTIFY + per-coroutine timer).
+   This is the high-value, invariant-preserving change and is the real fix for the nexus CPU burn.
+2. **Then, *if* burst/sweep wake-storms or per-wake parse cost are still measurable**, add
+   query-centralization (this document) as an optimization layer — at which point the §7 timer and
+   the central discoverer converge anyway (the discoverer *owns* "next due").
+
+If the implementer disagrees and wants centralization first (e.g. because the child-terminal NOTIFY
+is judged too invasive), that's a legitimate call — but it should be made **knowing** it trades the
+§9a invariants for an efficiency the event-driven path also delivers, not by default.
+
+## 10. Definition of done
 
 - This design note (done; revise as the code is written).
 - A `WorkDiscoverer` that runs `K` (fingerprint-grouped) discovery queries and dispatches to a
