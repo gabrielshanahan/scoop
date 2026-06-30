@@ -9,7 +9,7 @@ maven-publish = "0.36.0"        # checked: 2026-06-20 (Kotlin 2.3 unblocks 0.33+
 slf4j = "2.0.18"               # checked: 2026-06-20
 jackson = "2.22.0"             # checked: 2026-06-20
 postgresql = "42.7.11"          # checked: 2026-06-20
-junit = "5.14.4"                # checked: 2026-06-20 — latest 5.x
+junit = "6.1.1"                # checked: 2026-06-20 — latest 5.x
 
 [libraries]
 # Core (framework-agnostic) dependencies
