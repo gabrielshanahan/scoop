@@ -1,6 +1,6 @@
 [versions]
 kotlin = "2.3.21"               # checked: 2026-06-20 (Quarkus 3.36.3 BOM's Kotlin)
-quarkus = "3.36.3"              # checked: 2026-06-20
+quarkus = "3.37.0"              # checked: 2026-06-20
 ktfmt = "0.26.0"               # checked: 2026-06-20
 detekt = "2.0.0-alpha.3"       # checked: 2026-06-20 — first 2.0 alpha that reads Kotlin 2.3 (K2); alpha.4/.5 pull Kotlin 2.4
 fluentjdbc = "1.8.6"           # checked: 2026-06-20 — latest
