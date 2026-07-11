@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+## v0.5.0 — 2026-07-11
+
 Four latent bugs surfaced by the TypeScript port's zero-flakiness soak campaign
 ([scoop-ts](https://github.com/gabrielshanahan/scoop-ts) — see its DECISIONS.md for the full
 forensics), fixed here and guarded by `LatentBugRegressionTest`, which reconstructs each failure
