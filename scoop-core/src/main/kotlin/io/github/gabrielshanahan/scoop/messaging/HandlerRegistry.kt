@@ -27,6 +27,15 @@ interface HandlerRegistry {
     fun listenersByTopic(): Map<String, List<String>>
 }
 
-/** Creates a [StandardEventLoopStrategy] using this registry's listener topology. */
-fun HandlerRegistry.eventLoopStrategy() =
-    StandardEventLoopStrategy(OffsetDateTime.now(), this::listenersByTopic)
+/**
+ * Creates a [StandardEventLoopStrategy] using this registry's listener topology.
+ *
+ * [ignoreOlderThan] anchors the "ignore hierarchies older than" cutoff. It defaults to the client
+ * clock at the time of the call, but the timestamps it is compared against
+ * (`message_event.created_at`) come from the DATABASE clock — if the client clock runs even a few
+ * milliseconds ahead of the database clock, a message launched right after this call is "older
+ * than" the cutoff and is ignored forever (its SEEN is never created). When that skew matters, pass
+ * a database-anchored timestamp (`SELECT clock_timestamp()`) instead.
+ */
+fun HandlerRegistry.eventLoopStrategy(ignoreOlderThan: OffsetDateTime = OffsetDateTime.now()) =
+    StandardEventLoopStrategy(ignoreOlderThan, this::listenersByTopic)

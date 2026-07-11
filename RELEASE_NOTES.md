@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## Unreleased
 
+Four latent bugs surfaced by the TypeScript port's zero-flakiness soak campaign
+([scoop-ts](https://github.com/gabrielshanahan/scoop-ts) — see its DECISIONS.md for the full
+forensics), fixed here and guarded by `LatentBugRegressionTest`, which reconstructs each failure
+condition deterministically.
+
+### Fixed
+
+- **Same-microsecond `created_at` ties could silently skip children's rollbacks.** The
+  step-window CTEs compare same-lineage events with strict `<` on `created_at`;
+  `CLOCK_TIMESTAMP()` has microsecond resolution, so an emission and its SUSPENDED mark written
+  back-to-back in one tick transaction could land in the same microsecond — the emission then
+  vanished from "emitted in latest step" and the parent resumed without waiting for (or rolling
+  back) its children. Engine INSERTs that carry a cooperation lineage now set
+  `created_at = GREATEST(CLOCK_TIMESTAMP(), lineage max + 1 microsecond)`, making per-lineage
+  timestamps strictly increasing; the readiness SQL is untouched.
+- **Rollback-path deadlines never fired.** The deadline element serialized under
+  `RollbackPathDeadlineKey` (its class simple name) while the give-up SQL and the V2 partial
+  index check `RollbackDeadlineKey` — so the predicate could never match and a rollback
+  exceeding its deadline just kept running. The key object is renamed to `RollbackDeadlineKey`
+  (matching the SQL and the existing index — no migration needed). Rows written by older
+  versions keep the old name and remain unenforced, exactly as before, so there is no upgrade
+  regression. **API note:** code referencing `RollbackPathDeadlineKey` directly must rename to
+  `RollbackDeadlineKey`; the `RollbackPathDeadline` element class is unchanged.
+- **A message published right after `subscribe()` could miss its NOTIFY.** The LISTEN
+  registration completes asynchronously; a notification fired in that window was lost and the
+  worker waited for the reconcile safety net (30s by default) — the acknowledged source of test
+  flakiness in the README. `subscribe()` now waits (bounded by 5s; correctness never depends on
+  the notification path) for the registration to be acknowledged before returning.
+  **API note:** `TopicNotifier.onMessage` now returns `NotificationRegistration`
+  (an `AutoCloseable` with a `ready` future); custom implementations must adapt.
+
+### Added
+
+- **`HandlerRegistry.eventLoopStrategy(ignoreOlderThan)`** — optional explicit cutoff for the
+  "ignore hierarchies older than" check. The default remains the client clock at call time, but
+  the cutoff is compared against database-clock timestamps: with the client clock even a few
+  milliseconds ahead, a message launched right after the strategy is built is "older than" the
+  cutoff and is ignored forever (its SEEN is never created). Passing a database-anchored
+  timestamp (`SELECT clock_timestamp()`) removes the skew term entirely.
+
 ## v0.4.0 — 2026-06-25
 
 ### Changed

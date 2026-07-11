@@ -16,7 +16,11 @@ import java.sql.Connection
 import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.*
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import org.postgresql.util.PGobject
 import org.slf4j.LoggerFactory
@@ -25,6 +29,13 @@ private const val DEFAULT_TICK_INTERVAL_MS = 50L
 
 /** Default interval between event loop polling ticks (50 milliseconds). */
 val DEFAULT_TICK_INTERVAL: Duration = Duration.ofMillis(DEFAULT_TICK_INTERVAL_MS)
+
+/**
+ * Upper bound on how long [PostgresMessageQueue.subscribe] waits for the topic's LISTEN
+ * registration to be acknowledged before returning anyway (notification delivery affects only
+ * latency, never correctness).
+ */
+val LISTEN_REGISTRATION_TIMEOUT: Duration = Duration.ofSeconds(5)
 
 /**
  * Interactions with the message queue implementation. Supports [launching messages][launch],
@@ -187,6 +198,8 @@ class PostgresMessageQueue(
             WorkerHandle(workerSaga.identifier, notifierHandle, periodicTick)
         }
 
+        awaitListenRegistration(topic, workerHandles)
+
         return Subscription {
             workerHandles.forEach { handle ->
                 topicsToCoroutines.remove(topic to handle.identifier)
@@ -196,9 +209,41 @@ class PostgresMessageQueue(
         }
     }
 
+    /**
+     * Waits (bounded) for the workers' LISTEN registrations to be acknowledged. The registration
+     * behind onMessage completes asynchronously; a message published after subscribe() returns but
+     * before the registration is acknowledged fires its NOTIFY into the void, and the worker then
+     * waits for the reconcile safety net (30s by default). Correctness never depends on the
+     * notification path, so a timeout or failure only costs latency — we log and continue.
+     */
+    private fun awaitListenRegistration(topic: String, workerHandles: List<WorkerHandle>) {
+        try {
+            CompletableFuture.allOf(*workerHandles.map { it.notifierHandle.ready }.toTypedArray())
+                .get(LISTEN_REGISTRATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw e
+        } catch (e: TimeoutException) {
+            logger.warn(
+                "LISTEN registration for topic '{}' not confirmed within {} — notifications " +
+                    "may be delayed until the reconcile safety net",
+                topic,
+                LISTEN_REGISTRATION_TIMEOUT,
+                e,
+            )
+        } catch (e: ExecutionException) {
+            logger.warn(
+                "LISTEN registration for topic '{}' failed — notifications may be delayed " +
+                    "until the reconcile safety net",
+                topic,
+                e,
+            )
+        }
+    }
+
     private data class WorkerHandle(
         val identifier: DistributedCoroutineIdentifier,
-        val notifierHandle: AutoCloseable,
+        val notifierHandle: NotificationRegistration,
         val periodicTick: PeriodicTick,
     )
 

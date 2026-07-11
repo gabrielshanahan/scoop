@@ -15,6 +15,24 @@ import org.intellij.lang.annotations.Language
 import org.postgresql.util.PGobject
 import org.slf4j.LoggerFactory
 
+/**
+ * `created_at` expression for engine INSERTs that carry a cooperation lineage: strictly greater
+ * than every existing `created_at` of that lineage. The step-window CTEs (see
+ * [PendingCoroutineRunSql] and [MessageEventRepository.insertRollbackEmittedEventsForStep]) compare
+ * same-lineage events with strict `<` on `created_at`; `CLOCK_TIMESTAMP()` has microsecond
+ * resolution, so two INSERTs in one tick transaction (an emission followed by its SUSPENDED mark)
+ * can land in the same microsecond — the emission then vanishes from the "emitted in latest step"
+ * window and the parent resumes without waiting for (or rolling back) its children, violating
+ * structured cooperation. Nudging a tie 1 microsecond forward removes the tie at the source while
+ * keeping the readiness SQL untouched. Real-time semantics are preserved except under a tie, where
+ * the later event moves 1μs into the future.
+ */
+@Language("PostgreSQL", prefix = "SELECT ")
+private const val MONOTONIC_CREATED_AT =
+    "GREATEST(CLOCK_TIMESTAMP(), COALESCE(" +
+        "(SELECT max(created_at) FROM message_event WHERE cooperation_lineage = :cooperationLineage)" +
+        " + INTERVAL '1 microsecond', CLOCK_TIMESTAMP()))"
+
 @Suppress("TooManyFunctions")
 class MessageEventRepository(
     private val jsonbHelper: JsonbHelper,
@@ -48,7 +66,7 @@ class MessageEventRepository(
                 .queryOn(connection)
                 .update(
                     "--${messageId} || ${cooperationLineage}\n" +
-                        "INSERT INTO message_event (message_id, type, cooperation_lineage, context) VALUES (:messageId, 'EMITTED', :cooperationLineage, :context)"
+                        "INSERT INTO message_event (message_id, type, cooperation_lineage, context, created_at) VALUES (:messageId, 'EMITTED', :cooperationLineage, :context, $MONOTONIC_CREATED_AT)"
                 )
                 .namedParam("messageId", messageId)
                 .namedParam(
@@ -99,8 +117,8 @@ class MessageEventRepository(
                 .queryOn(connection)
                 .update(
                     """
-                    INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, context)
-                    VALUES (:messageId, 'EMITTED', :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :context)
+                    INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, context, created_at)
+                    VALUES (:messageId, 'EMITTED', :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :context, $MONOTONIC_CREATED_AT)
                     """
                         .trimIndent()
                 )
@@ -171,13 +189,14 @@ class MessageEventRepository(
                         LIMIT 1
                     )
                     INSERT INTO message_event (
-                        message_id, 
-                        type,  
-                        cooperation_lineage, 
-                        exception
+                        message_id,
+                        type,
+                        cooperation_lineage,
+                        exception,
+                        created_at
                     )
-                    SELECT 
-                        message_id_lookup.message_id, 'ROLLBACK_EMITTED', :cooperationLineage, :exception
+                    SELECT
+                        message_id_lookup.message_id, 'ROLLBACK_EMITTED', :cooperationLineage, :exception, $MONOTONIC_CREATED_AT
                     FROM message_id_lookup
                     WHERE NOT EXISTS (
                         -- Safety check: Only emit rollback if no part of the cooperation tree is actively running
@@ -268,18 +287,20 @@ class MessageEventRepository(
                         LIMIT 1
                     )
                     INSERT INTO message_event (
-                        message_id, 
-                        type, 
-                        coroutine_name, coroutine_identifier, step, 
-                        cooperation_lineage, 
-                        exception
-                    ) 
-                    SELECT 
+                        message_id,
+                        type,
+                        coroutine_name, coroutine_identifier, step,
+                        cooperation_lineage,
+                        exception,
+                        created_at
+                    )
+                    SELECT
                         message_id_lookup.message_id,
                         'CANCELLATION_REQUESTED',
-                        null, null, null, 
-                        :cooperationLineage, 
-                        :exception
+                        null, null, null,
+                        :cooperationLineage,
+                        :exception,
+                        $MONOTONIC_CREATED_AT
                     FROM message_id_lookup
                     ON CONFLICT (cooperation_lineage, type) WHERE type = 'CANCELLATION_REQUESTED' DO NOTHING
                     """
@@ -310,8 +331,8 @@ class MessageEventRepository(
                 .queryOn(connection)
                 .update(
                     """
-                    INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, exception, context, child_failure_handler_iteration, next_step)
-                    VALUES (:messageId, :messageEventType::message_event_type, :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :exception, :context, :childFailureHandlerIteration, :nextStep)
+                    INSERT INTO message_event (message_id, type, coroutine_name, coroutine_identifier, step, cooperation_lineage, exception, context, child_failure_handler_iteration, next_step, created_at)
+                    VALUES (:messageId, :messageEventType::message_event_type, :coroutineName, :coroutineIdentifier, :stepName, :cooperationLineage, :exception, :context, :childFailureHandlerIteration, :nextStep, $MONOTONIC_CREATED_AT)
                     """
                         .trimIndent()
                 )
@@ -387,11 +408,13 @@ class MessageEventRepository(
                     INSERT INTO message_event (
                         message_id, type,
                         cooperation_lineage, coroutine_name, coroutine_identifier, step,
-                        exception, context
+                        exception, context,
+                        created_at
                     )
                     SELECT
                         message_id, 'ROLLBACK_EMITTED',
-                        :cooperationLineage, :coroutineName, :coroutineIdentifier, :scopeStepName, :exception, :context
+                        :cooperationLineage, :coroutineName, :coroutineIdentifier, :scopeStepName, :exception, :context,
+                        $MONOTONIC_CREATED_AT
                     FROM emitted_record
                     """
                         .trimIndent()
